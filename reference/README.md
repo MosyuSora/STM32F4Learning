@@ -3,9 +3,10 @@
 本目录存放野火官方提供的原始学习资料。代码文件夹编号（如 `11`, `21`）对应教程中的篇章逻辑。
 
 ## 📑 教程与源码对照索引 (Quick Index)
-
+【批注：看完整pdf，第0大章是什么 1是什么 2是什么 不然无法解释01 02 11 12这些内容，然后在表格里体现出来。】
 | 章节 (PDF) | 标题内容 | 官方源码路径 (Official Code) |
 | :--- | :--- | :--- |
+| Chapter 01(需要补全只有教程没有代码的） |缺教程 ？？？./pdf/chapters/Chapter_01 xxxx|无需代码|
 | Chapter 07 | [新建工程—寄存器版](./pdf/chapters/Chapter_07_新建工程—寄存器版.pdf) | [7-新建工程-寄存器版本](./official_tutorial_code/7-新建工程-寄存器版本) |
 | Chapter 08 | [使用寄存器点亮 LED 灯](./pdf/chapters/Chapter_08_使用寄存器点亮_LED_灯.pdf) | [8-使用寄存器点亮LED灯](./official_tutorial_code/8-使用寄存器点亮LED灯) / [三灯版](./official_tutorial_code/8-使用寄存器点亮LED灯-三个灯) |
 | Chapter 09 | [自己写库—构建库函数雏形](./pdf/chapters/Chapter_09_自己写库—构建库函数雏形.pdf) | [9-自己写库—构建库函数雏形](./official_tutorial_code/9-自己写库—构建库函数雏形) |
