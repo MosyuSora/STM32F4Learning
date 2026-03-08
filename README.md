@@ -10,13 +10,21 @@
 ## 📂 目录结构
 
 .
+
 ├── reference/               # [参考资料区](./reference/README.md)
+
 │   ├── pdf/                 # 野火官方教程（完整版 + 54个拆分章节版）
+
 │   └── official_tutorial_code/ # 野火官方配套全部例程源码
+
 ├── tutorials/               # 学习文档：深入浅出的markdown文档
+
 │   
+
 ├── code/                    # 学习文档工程代码
+
 │
+
 └── README.md                # 本文件
 
 
