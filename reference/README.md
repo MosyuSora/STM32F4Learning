@@ -4,19 +4,28 @@
 
 ## 📑 教程与源码对照索引 (54 Chapters Complete Index)
 
+### 🟢 第一部分：基础入门篇
+**逻辑说明**：编号 **0x** 开头。涵盖开发环境搭建、下载调试、STM32 选型及寄存器底层原理。
+
 | 章节 (PDF) | 标题内容 | 官方源码路径 (Official Code) | 备注 |
 | :--- | :--- | :--- | :--- |
-| Chapter 01 | [如何使用本书](./pdf/chapters/Chapter_01_如何使用本书.pdf) | 无需代码 | 教程使用指导 |
+| Chapter 01 | [如何使用本书](./pdf/chapters/Chapter_01_如何使用本书.pdf) | 无需代码 | 学习方法建议 |
 | Chapter 02 | [如何安装 KEIL5](./pdf/chapters/Chapter_02_如何安装_KEIL5.pdf) | 无需代码 | 环境搭建 |
-| Chapter 03 | [如何用 DAP 仿真器下载程序](./pdf/chapters/Chapter_03_如何用_DAP_仿真器下载程序.pdf) | 无需代码 | 仿真器配置 |
-| Chapter 04 | [如何用串口下载程序](./pdf/chapters/Chapter_04_如何用串口下载程序.pdf) | 无需代码 | 串口 ISP 下载 |
-| Chapter 05 | [初识 STM32](./pdf/chapters/Chapter_05_初识_STM32.pdf) | 无需代码 | 芯片简介与选型 |
+| Chapter 03 | [如何用 DAP 仿真器下载程序](./pdf/chapters/Chapter_03_如何用_DAP_仿真器下载程序.pdf) | 无需代码 | 硬件连接与配置 |
+| Chapter 04 | [如何用串口下载程序](./pdf/chapters/Chapter_04_如何用串口下载程序.pdf) | 无需代码 | ISP 下载原理 |
+| Chapter 05 | [初识 STM32](./pdf/chapters/Chapter_05_初识_STM32.pdf) | 无需代码 | 芯片背景与选型 |
 | Chapter 06 | [什么是寄存器](./pdf/chapters/Chapter_06_什么是寄存器.pdf) | 无需代码 | 存储器映射理论 |
 | Chapter 07 | [新建工程—寄存器版](./pdf/chapters/Chapter_07_新建工程—寄存器版.pdf) | [7-新建工程-寄存器版本](./official_tutorial_code/7-新建工程-寄存器版本) | 寄存器版工程模板 |
-| Chapter 08 | [使用寄存器点亮 LED 灯](./pdf/chapters/Chapter_08_使用寄存器点亮_LED_灯.pdf) | [8-使用寄存器点亮LED灯](./official_tutorial_code/8-使用寄存器点亮LED灯) / [三灯版](./official_tutorial_code/8-使用寄存器点亮LED灯-三个灯) | |
-| Chapter 09 | [自己写库—构建库函数雏形](./pdf/chapters/Chapter_09_自己写库—构建库函数雏形.pdf) | [9-自己写库—构建库函数雏形](./official_tutorial_code/9-自己写库—构建库函数雏形) | |
+| Chapter 08 | [使用寄存器点亮 LED 灯](./pdf/chapters/Chapter_08_使用寄存器点亮_LED_灯.pdf) | [8-使用寄存器点亮LED灯](./official_tutorial_code/8-使用寄存器点亮LED灯) / [三灯版](./official_tutorial_code/8-使用寄存器点亮LED灯-三个灯) | 第一个代码实战 |
+| Chapter 09 | [自己写库—构建库函数雏形](./pdf/chapters/Chapter_09_自己写库—构建库函数雏形.pdf) | [9-自己写库—构建库函数雏形](./official_tutorial_code/9-自己写库—构建库函数雏形) | 揭秘库函数本质 |
 | Chapter 10 | [初识 STM32 固件库](./pdf/chapters/Chapter_10_初识_STM32_固件库.pdf) | 无需代码 | 固件库文件结构分析 |
-| Chapter 11 | [新建工程—库函数版](./pdf/chapters/Chapter_11_新建工程—库函数版.pdf) | [11-新建工程-固件库版本](./official_tutorial_code/11-新建工程-固件库版本) | 1-1：标准化工程模板 |
+
+### 🔵 第二部分：固件库开发篇
+**逻辑说明**：编号 **1x** 开头。核心外设（GPIO、RCC、中断、定时器）的固件库开发实战。
+
+| 章节 (PDF) | 标题内容 | 官方源码路径 (Official Code) | 备注 |
+| :--- | :--- | :--- | :--- |
+| Chapter 11 | [新建工程—库函数版](./pdf/chapters/Chapter_11_新建工程—库函数版.pdf) | [11-新建工程-固件库版本](./official_tutorial_code/11-新建工程-固件库版本) | 1-1 |
 | Chapter 12 | [GPIO 输出—固件库点灯](./pdf/chapters/Chapter_12_GPIO_输出—使用固件库点灯.pdf) | [12-GPIO输出—使用库点灯](./official_tutorial_code/12-GPIO输出—使用固件库点亮LED灯) / [蜂鸣器](./official_tutorial_code/12-GPIO输出—蜂鸣器) | 1-2 |
 | Chapter 13 | [GPIO 输入—按键检测](./pdf/chapters/Chapter_13_GPIO_输入—按键检测.pdf) | [13-GPIO输入—按键检测](./official_tutorial_code/13-GPIO输入—按键检测) | 1-3 |
 | Chapter 14 | [GPIO—位带操作](./pdf/chapters/Chapter_14_GPIO—位带操作.pdf) | [14-位带操作](./official_tutorial_code/14-位带操作) / [三灯版](./official_tutorial_code/14-位带操作-三个灯) | 1-4 |
@@ -25,7 +34,13 @@
 | Chapter 17 | [STM32 中断应用概览](./pdf/chapters/Chapter_17_STM32_中断应用概览.pdf) | 无需代码 | NVIC 中断理论 |
 | Chapter 18 | [EXTI—外部中断](./pdf/chapters/Chapter_18_EXTI—外部中断_事件控制.pdf) | [18-EXTI—外部中断](./official_tutorial_code/18-EXTI—外部中断) | 1-8 |
 | Chapter 19 | [SysTick—系统定时器](./pdf/chapters/Chapter_19_SysTick—系统定时器.pdf) | [19-SysTick—系统定时器](./official_tutorial_code/19-SysTick—系统定时器) | 1-9 |
-| Chapter 20 | [通讯的基本概念](./pdf/chapters/Chapter_20_通讯的基本概念.pdf) | 无需代码 | 通讯协议基础 |
+
+### 🔴 第三部分：高级外设实战篇
+**逻辑说明**：编号 **2x, 3x, 4x, 5x** 开头。包含通讯总线、显示、存储、系统调试及复杂应用。
+
+| 章节 (PDF) | 标题内容 | 官方源码路径 (Official Code) | 备注 |
+| :--- | :--- | :--- | :--- |
+| Chapter 20 | [通讯的基本概念](./pdf/chapters/Chapter_20_通讯的基本概念.pdf) | 无需代码 | 串口、总线理论 |
 | Chapter 21 | [USART—串口通讯](./pdf/chapters/Chapter_21_USART—串口通讯.pdf) | [21-USART—串口通信](./official_tutorial_code/21-USART—串口通信) | 2-1 |
 | Chapter 22 | [DMA—直接存储区访问](./pdf/chapters/Chapter_22_DMA—直接存储区访问.pdf) | [22-DMA—直接存储区访问](./official_tutorial_code/22-DMA—直接存储区访问) | 2-2 |
 | Chapter 23 | [常用存储器介绍](./pdf/chapters/Chapter_23_常用存储器介绍.pdf) | 无需代码 | RAM/ROM 理论 |
@@ -62,4 +77,4 @@
 | Chapter 54 | [DCMI—OV5640 摄像头](./pdf/chapters/Chapter_54_DCMI—OV5640_摄像头.pdf) | [54-DCMI—OV5640摄像头](./official_tutorial_code/54-DCMI—OV5640摄像头) | |
 
 ---
-*Index updated by Phoebe (第一秘书 菲比) with 54-chapter full verification.*
+*Index Refined by Phoebe (第一秘书 菲比) with 54-chapter full verification.*
