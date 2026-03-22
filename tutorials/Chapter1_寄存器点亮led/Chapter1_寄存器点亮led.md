@@ -655,6 +655,46 @@ main()
 
 理解这一点以后，你再去看 CubeMX 生成的工程、标准库工程，启动文件就不再是一段“神秘模板”，而是 MCU 启动流程最核心的一部分。
 
+------
+
+#### 2.1.7 补充：GCC版启动文件和Keil版有什么不同
+
+前面我们讲解启动流程时，用的是 Keil/MDK 风格的启动文件，因为它的结构更规整，比较适合作为入门材料。不过如果你看Keil CubeMX生成的工程，会发现它用的是一份 GCC 版启动文件：[在这里](code/cubemx_min/led_minimum/startup_stm32f407xx.s)。
+
+这两份文件完成的任务本质上是一样的，都是为了把 MCU 从“刚上电”的状态带到“可以运行 `main()`”的状态，只不过**分工方式不同**。
+
+Keil 版的特点是：
+
+- 在启动文件里直接定义栈和堆
+- 在 `Reset_Handler` 里主要调用 `SystemInit()`
+- 然后跳到 `__main`
+- 再由 Keil 的 C 运行库去完成 `.data` 初始化、`.bss` 清零等工作
+
+GCC 版则更“直白”一点。它通常不在启动文件里自己分配栈堆，而是依赖链接脚本（`.ld` 文件）提供 `_estack`、`_sdata`、`_edata`、`_sbss`、`_ebss` 这些符号。然后在 `Reset_Handler` 里自己完成下面这些工作：
+
+1. 设置栈指针 `sp`
+2. 调用 `SystemInit()`
+3. 把 `.data` 段从 FLASH 拷贝到 RAM
+4. 把 `.bss` 段清零
+5. 调用 `__libc_init_array`
+6. 跳转到 `main()`
+
+所以你可以简单记：
+
+- **Keil版**：很多运行时初始化工作藏在 `__main` 里面
+- **GCC版**：很多运行时初始化工作直接写在 `Reset_Handler` 里面
+
+这也是为什么你会看到，Keil 版启动文件更像“先把流程交给物业”，而 GCC 版更像“自己把搬家具、通水电这些事情一件件做完”。
+
+不过不要被语法差异吓到。无论是 `AREA`、`DCD`、`EXPORT [WEAK]`，还是 `.section`、`.word`、`.weak`、`.thumb_set`，说到底都只是不同工具链下的不同写法。它们背后的系统逻辑并没有变：
+
+- 先准备栈
+- 再进入复位处理函数
+- 初始化运行环境
+- 最后调用 `main()`
+
+所以，前面按 Keil 版建立起对启动流程的整体理解，后面再去看 GCC 版，其实只是“换了一套方言”，不是换了一套世界观。
+
 ### 2.2 时钟配置
 
 #### 2.2.1 时钟树
@@ -832,7 +872,7 @@ graph TD
 
 ------
 
-### 
+
 
 ##### 数据流向和MODER寄存器定义
 
@@ -846,7 +886,7 @@ graph TD
 
 过去在8位单片机里，数据手册前几页就是引脚功能，你会在某个引脚后面看到一长串功能：TIM/TX/SDA.... 但32的外设资源不是这个逻辑。一个外设资源不见得固定属于某个引脚。这就是复用。
 
-这个可以说是stm32伟大的总线矩阵设计导致的一个炫酷功能。 **因为有总线矩阵，我们可以轻易实现外设资源和GPIO本身的分离**，外设不再是和某几个GPIO强制绑定，而是通过复用的配置实现灵活的绑定和解绑。当我们启用了复用模式后，我们可以在GPIOx_AFR中（有高低位两个寄存器，AFRL和AFRH)选择AF1~16总共十六个外设资源槽位，就可以把GPIO绑定到特定的外设上。 当然由于布线本身的限制，一个特定的GPIO一般只能绑几个特定的外设。我们在[数据手册](../../reference/pdf/STM32F407_405 Datasheet.pdf)的Table.9中可以看到这个映射关系。
+这个可以说是stm32伟大的总线矩阵设计导致的一个炫酷功能。 **因为有总线矩阵，我们可以轻易实现外设资源和GPIO本身的分离**，外设不再是和某几个GPIO强制绑定，而是通过复用的配置实现灵活的绑定和解绑。当我们启用了复用模式后，我们可以在GPIOx_AFR中（有高低位两个寄存器，AFRL和AFRH）选择AF1~16总共十六个外设资源槽位，就可以把GPIO绑定到特定的外设上。 当然由于布线本身的限制，一个特定的GPIO一般只能绑几个特定的外设。我们在[数据手册](../../reference/pdf/STM32F407_405 Datasheet.pdf)的Table.9中可以看到这个映射关系。
 
 同理，模拟也有映射表。在[数据手册](../../reference/pdf/STM32F407_405 Datasheet.pdf)的Table.8中可以看到哪些引脚实际上有ADC资源。
 
@@ -894,7 +934,7 @@ graph TD
 
 上拉和下拉就不难理解了，看图就知道，他针对的是不同的输入信号，如果输入信号没有驱动能力（Z/0)，比如收到了一个开漏模式的输出，我们需要上拉。如果信号没有拉低电平的能力（1/Z,你开心可以管他叫开源输出）。如果信号自己既能驱动又能拉低(1/0) ，比如收到了一个推挽模式的输出，我们浮空即可
 
-| 输入信号（Hi) | 输入信号(Lo) | 选用模式 |
+| 输入信号（Hi） | 输入信号(Lo) | 选用模式 |
 | ------------- | ------------ | -------- |
 | 1             | 0            | 浮空输入 |
 | 1             | Z            | 下拉输入 |
@@ -954,7 +994,7 @@ $$
 
 GPIOx基址：`0x40000000(Block0)+0x20000(AHB1)+0x400*N(N=0,1,2,3....,8)(GPIOx Port，x=A~I)`
 
-GPIOx_**MODER**:`GPIOx+0x18 `    一个pin使用2 bits[1:0]。 00输入，01输出，10复用，11模拟（大端序）
+GPIOx_**MODER**:`GPIOx+0x00 `    一个pin使用2 bits[1:0]。 00输入，01输出，10复用，11模拟（大端序）
 
 ##### 输出
 
@@ -976,7 +1016,7 @@ GPIOx_**AFH**:`GPIOx+0x24 `,Pin9~16的AF外设选择，一个pin使用4 bits[3:0
 
 GPIOx_**AFL**:`GPIOx+0x20 `,Pin1~8的AF外设选择，一个pin使用4 bits[3:0]，对应AF1~AF16
 
-## 3 毛坯房：纯汇编点灯
+## 3 毛坯房：纯汇编点灯（基于ST-Link下载器自建工程）
 
 经过艰难的适应，我们现在可以自豪地说我们已经是STM32的本地人了。现在需要改什么寄存器，在哪改，哪怕是大部分人颇感畏惧的汇编写程序都已经不再是问题了。 接下来我们就用汇编点灯。 点灯之前，我们还是得熟悉一下，最简陋的情况下，搭建一个STM32工程需要搭建什么样的开发环境。
 
@@ -1058,9 +1098,781 @@ PC 上位机 → 串口/USB 等外设接口 → STM32 内部 Bootloader → Flas
  它通常只能完成下载、擦除、校验这一类操作，至于打断点、单步执行、查看寄存器、追踪调用栈、在线观察变量，这些调试器的看家本领，ISP 一般是不给你的。
  所以如果你只是要把程序刷进去跑，ISP 很方便；但如果你在开发阶段要认真调 bug，还是得老老实实上 ST-Link 或者别的 SWD/JTAG 调试器。
 
-3.1.2 编译汇编和链接器
+#### 3.1.2 工具链：编译、汇编与链接器
 
-## 4 简装房：标准库点灯
+在“毛坯房”阶段，我们手里的 `.s` 汇编源文件只是几行文本，要让单片机跑起来，必须经过汇编（Assembling）和链接（Linking）两个关键步骤。针对 3.1.1 提到的不同平台，对应的工具链也各不相同。
+
+##### ARM Compiler (Keil MDK 的灵魂)
+
+Keil 内部集成了 ARM 官方开发的编译器。根据版本不同，你可能会遇到两个完全不同的汇编器：
+
+- **armasm (AC5 - Arm Compiler 5):** 这是传统的汇编器。它的语法非常“独树一帜”，比如定义常量用 `EQU`，导出符号用 `EXPORT`。如果你参考的是一些十年前的经典老教程，大部分都是基于 AC5 语法的。
+- **armclang (AC6 - Arm Compiler 6):** 这是基于 LLVM 架构的新一代编译器。AC6 的汇编语法默认兼容 **GNU 汇编语法**。这意味着你在 Linux 下写的汇编代码，拿到 Keil AC6 环境下大概率可以直接编译。
+
+**核心工具：**
+
+1. **汇编器：** 将 `.s` 文件转换成机器码组成的 `.o` 目标文件。
+2. **链接器 (armlink)：** 配合 **分散加载文件 (Scatter File, .sct)**。这个文件至关重要，它规定了你的代码放在 Flash 的哪个地址，堆栈放在 RAM 的哪个位置。
+
+------
+
+##### GNU Arm Embedded Toolchain (开源界的标准)
+
+无论你是在 Linux 下用命令行，还是在 Windows 下用 VSCode 或 STM32CubeIDE，底层调用的几乎都是 **GCC (arm-none-eabi-gcc)**。
+
+在 GCC 工具链中，汇编并不是一个孤立的过程：
+
+- **汇编器 (as):** 处理标准 GNU 汇编语法。
+- **链接器 (ld):** 使用 **链接脚本 (Linker Script, .ld)**。
+
+做完32去学Arm Linux开发，很多同学会想到，STM32 的 GCC 编译器可不可用来编译嵌入式 Linux 的程序？答案是：**不行**。
+
+这就是我们要特别强调的：**交叉编译工具链的命名三元组（Target Triplet）**。
+
+当你安装 GCC 时，你会发现它的名字长得像绕口令：`arm-none-eabi-gcc`。这串字符不是乱起的，它代表了编译器生成的代码“跑在什么地方”：
+
+- **arm**: 指架构（Architecture），说明生成的是 ARM 指令。
+- **none**: 指厂商（Vendor），这里通常是 `none` 或者 `unknown`，代表没有特定硬件供应商绑定。
+- **eabi**: 指嵌入式应用二进制接口（Embedded ABI）。
+- **关键点在中间的 OS 位**：
+  - `none`：代表**裸机（Bare-metal）**。没有操作系统，代码直接控死寄存器。这就是我们点灯用的工具。
+  - `linux`：比如 `arm-linux-gnueabihf-gcc`。它会链接 Linux 的标准 C 库（Glibc），支持系统调用。如果你拿它写 STM32 的点灯，编译器会试图寻找 `printf` 背后对应的打印驱动和文件描述符，而你的单片机里连个内核都没有，直接原地爆炸。
+
+所以，虽然都叫 GCC，但 **裸机工具链（arm-none-eabi）** 和 **Linux 工具链（arm-linux-gnueabihf）** 是两条平行线。我们接下来的“毛坯房点灯”，必须认准 `arm-none-eabi`。
+
+------
+
+##### 工具链对比表
+
+| 特性             | ARM Compiler (Keil AC5) | ARM Compiler (Keil AC6) | GNU Arm Toolchain (GCC) |
+| ---------------- | ----------------------- | ----------------------- | ----------------------- |
+| **汇编语法**     | 传统 ARM 语法           | GNU 语法 (兼容性强)     | 标准 GNU 语法           |
+| **链接配置文件** | `.sct` (Scatter File)   | `.sct`                  | `.ld` (Linker Script)   |
+| **常见环境**     | 传统企业项目、老教程    | 现代 Keil 工程          | VSCode, CubeIDE, Linux  |
+| **价格**         | 闭源收费 (MDK 授权)     | 闭源收费                | **完全免费开源**        |
+
+
+
+### 3.2 啰嗦完了 开始写代码了
+
+#### 3.2.1 寄存器行为拆解
+
+接下来开始实现。查询开发板引脚图，以野火的F407开发板为例，我们使用D3，这是一个RGB三色led，对应GPIOF的PF6、PF7和PF8。我们每间隔0.5s切换依次颜色：红->绿->蓝。
+
+![](/img/12.png)
+
+我们回顾一下需要改哪些寄存器和哪些值。
+
+先说明一点：这个RGB灯是**低电平点亮，高电平熄灭**。
+
+**RCC** 基址 `0x40023800`
+
+* `RCC_CFGR: 0x08`
+
+    选择HSI：`SW[1:0] = 00`
+
+    默认系统时钟频率：`16MHz`
+
+    分频器：默认
+
+* `RCC_AHB1ENR: 0x30`
+
+    使能GPIOF：`[5] -> 1`
+
+**GPIOF** 基址：`0x40021400 = 0x40020000 + 0x1400`
+
+* `GPIOF_MODER: 0x00`
+
+    PF6~PF8：`MODER[17:12] = 0b 01 01 01 = 0x15 << 12 = 0x00015000`
+
+* `GPIOF_OTYPER: 0x04`
+
+    PF6~PF8：`OT[8:6] = 000b`
+
+* `GPIOF_OSPEEDR: 0x08`
+
+    PF6~PF8：`OSPEEDR[17:12] = 0b 00 00 00`
+
+* `GPIOF_PUPDR: 0x0C`
+
+    PF6~PF8：`PUPDR[17:12] = 0b 01 01 01 = 0x15 << 12 = 0x00015000`
+
+* `GPIOF_ODR: 0x14`
+
+    红：`PF8 PF7 PF6 = 110 -> 0b110000000 = 0x0180`
+
+    绿：`PF8 PF7 PF6 = 101 -> 0b101000000 = 0x0140`
+
+    蓝：`PF8 PF7 PF6 = 011 -> 0b011000000 = 0x00C0`
+
+    全灭：`PF8 PF7 PF6 = 111 -> 0b111000000 = 0x01C0`
+
+* `GPIOF_BSRR: 0x18`
+
+    低16位：BS；高16位：BR
+    
+    红：BR6, BS7, BS8 -> `0x00400180`
+    
+    绿：BS6, BR7, BS8 -> `0x00800140`
+    
+    蓝：BS6, BS7, BR8 -> `0x010000C0`
+
+这三个值在纯汇编里非常好用，因为可以直接 `LDR` 成立即数再写寄存器。
+
+为了后面写汇编方便，我们把最终要用到的寄存器和值收拢一下：
+
+| 模块 | 寄存器 | 地址 | 操作(以C语法表达) |
+| ---- | ------ | ---- | ---- |
+| RCC | `RCC_AHB1ENR` | `0x40023830` | `RCC_AHB1ENR |= (1U << 5);` |
+| GPIOF | `GPIOF_MODER` | `0x40021400` | `GPIOF_MODER = (GPIOF_MODER & ~(0x3FU << 12)) | (0x15U << 12);` |
+| GPIOF | `GPIOF_OTYPER` | `0x40021404` | `GPIOF_OTYPER &= ~(0x7U << 6);` |
+| GPIOF | `GPIOF_OSPEEDR` | `0x40021408` | `GPIOF_OSPEEDR &= ~(0x3FU << 12);` |
+| GPIOF | `GPIOF_PUPDR` | `0x4002140C` | `GPIOF_PUPDR = (GPIOF_PUPDR & ~(0x3FU << 12)) | (0x15U << 12);` |
+| GPIOF | `GPIOF_ODR` | `0x40021414` | R:`GPIOF_ODR = 0x0180;`<br>G:`GPIOF_ODR = 0x0140;`<br>B:`GPIOF_ODR = 0x00C0;` |
+| GPIOF | `GPIOF_BSRR` | `0x40021418` | `GPIOF_BSRR = 0x00400180;`<br>`GPIOF_BSRR = 0x00800140;`<br>`GPIOF_BSRR = 0x010000C0;` |
+
+#### 3.2.2 Delay计算
+
+过去学习八位机，我们是使用机械周期和时钟周期来计算一条汇编指令需要执行多少时间的。 这之所以可能是因为八位单片机的CPU架构简单，就是几个ALU，PC之类的组合，不涉及到各种并行优化，尤其是会影响到指令执行时间的指令级并行（流水线，超标量之类）。
+
+但是ARM Cortex是非常复杂的流水线处理器，无法使用8位机常见的“机械周期”表述，而直接按 CPU 时钟周期估算延时循环的耗时。
+
+如果我们使用计数器自减+跳转的方式写这个代码
+
+```asm
+delay_loop: 		
+    subs r2, r2, #1  ;r2=r2-1
+    bne delay_loop  
+    bx lr
+```
+
+我们只能粗略的估计这个循环的周期位4个clock cycle
+
+延时计算:$$f_{clk}=16MHz,t_{delay}=0.5s,C_{loop}=4, N_{delay}=\frac{f_{clk}\times t_{delay}}{C_{loop}}=2,000,000$$
+
+你可能也发现了 这个估计出来时间必然不准，这也就是为啥STM32的Systick是一个几乎必须初始化的外设，我们必须依赖片内资源来给任务计时。
+
+
+
+#### 3.2.3 编写汇编文件`led.s`
+
+这里为了展示完整流程，我们不再借助Keil工程或者CubeMX生成的代码骨架，而是自己从零搭一个最小工程。最终工程目录只保留三个文件：
+
+```text
+ASM_LED/
+├── led.s
+├── STM32F407XX_FLASH.ld
+└── Makefile
+```
+
+注意，**纯汇编程序不等于只写点灯逻辑**。前面 2.1 已经讲过，Cortex-M 上电以后，CPU 先去 `0x00000000` 取初始栈顶，再去 `0x00000004` 取复位入口。所以即使我们不用 C 运行库，不写 `main.c`，也仍然至少要解决三件事情：
+
+1. 提供一个**向量表**
+2. 提供一个**Reset_Handler**
+3. 提供一个**初始栈顶符号** `_estack`
+
+Keil 版启动文件把这些东西单独放在 `startup_stm32f4xx.s` 里。我们现在做得更激进一点：**不单独保留启动文件，而是把最小启动内容直接塞进 `led.s`**。这样工程更干净，也更符合“毛坯房”的定位。
+
+先看 `led.s` 的前半部分：
+
+```asm
+    .syntax unified
+    .cpu cortex-m4
+    .fpu softvfp
+    .thumb
+
+    .global g_pfnVectors
+    .global Reset_Handler
+
+    .section .isr_vector,"a",%progbits
+g_pfnVectors:
+    .word _estack
+    .word Reset_Handler
+    .word Default_Handler
+    .word Default_Handler
+    .word Default_Handler
+    .word Default_Handler
+    .word Default_Handler
+    .word 0
+    .word 0
+    .word 0
+    .word 0
+    .word Default_Handler
+    .word Default_Handler
+    .word 0
+    .word Default_Handler
+    .word Default_Handler
+    .rept 82
+        .word Default_Handler
+    .endr
+
+    .section .text.Reset_Handler,"ax",%progbits
+Reset_Handler:
+    bl main
+reset_hang:
+    b reset_hang
+
+    .section .text.Default_Handler,"ax",%progbits
+Default_Handler:
+default_hang:
+    b default_hang
+```
+
+这一段本质上就是把 2.1 讲的启动代码压缩到了最小：
+
+- 向量表第一项放 `_estack`
+- 第二项放 `Reset_Handler`
+- 其余异常和中断全部兜底到 `Default_Handler`
+
+这里为什么可以写得这么短？因为我们的程序有两个明显特点：
+
+1. 没有 `.data` 初始化需求
+2. 没有 `.bss` 清零需求
+
+也就是说，我们没有全局变量，没有静态变量，没有 C 库初始化，也没有 `__main`、`__libc_init_array` 这些东西要跑。所以 Reset 阶段除了跳到自己的主逻辑外，不需要多余动作。
+
+这也正好和 2.1 的结论呼应：
+
+- **启动代码的职责是不变的**
+- **具体要做多少事，取决于你的程序复杂度**
+
+接着才是点灯逻辑本体。这里我们把前面表格里的寄存器操作，直接翻译成汇编：
+
+```asm
+    .equ RCC_AHB1ENR,   0x40023830
+    .equ GPIOF_MODER,   0x40021400
+    .equ GPIOF_OTYPER,  0x40021404
+    .equ GPIOF_OSPEEDR, 0x40021408
+    .equ GPIOF_PUPDR,   0x4002140C
+    .equ GPIOF_BSRR,    0x40021418
+
+    .equ GPIOF_MODER_MASK,   0x0003F000
+    .equ GPIOF_MODE_OUTPUT,  0x00015000
+    .equ GPIOF_OTYPER_MASK,  0x000001C0
+    .equ GPIOF_OSPEEDR_MASK, 0x0003F000
+    .equ GPIOF_PUPDR_MASK,   0x0003F000
+    .equ GPIOF_PUPDR_UP,     0x00015000
+
+    .equ LED_RED_BSRR,   0x00400180
+    .equ LED_GREEN_BSRR, 0x00800140
+    .equ LED_BLUE_BSRR,  0x010000C0
+    .equ DELAY_COUNT,    2000000
+```
+
+这里统一用 `.equ` 定义常量，目的是让后面 `LDR` 装立即数时更清晰。地址、掩码、最终写入值全部展开写死，和前面的寄存器拆解一一对应。
+
+主逻辑如下：
+
+```asm
+main:
+    ldr r0, =RCC_AHB1ENR
+    ldr r1, [r0]
+    orr r1, r1, #(1 << 5)
+    str r1, [r0]
+
+    ldr r0, =GPIOF_MODER
+    ldr r1, [r0]
+    ldr r2, =GPIOF_MODER_MASK
+    bic r1, r1, r2
+    ldr r2, =GPIOF_MODE_OUTPUT
+    orr r1, r1, r2
+    str r1, [r0]
+
+    ldr r0, =GPIOF_OTYPER
+    ldr r1, [r0]
+    ldr r2, =GPIOF_OTYPER_MASK
+    bic r1, r1, r2
+    str r1, [r0]
+
+    ldr r0, =GPIOF_OSPEEDR
+    ldr r1, [r0]
+    ldr r2, =GPIOF_OSPEEDR_MASK
+    bic r1, r1, r2
+    str r1, [r0]
+
+    ldr r0, =GPIOF_PUPDR
+    ldr r1, [r0]
+    ldr r2, =GPIOF_PUPDR_MASK
+    bic r1, r1, r2
+    ldr r2, =GPIOF_PUPDR_UP
+    orr r1, r1, r2
+    str r1, [r0]
+```
+
+这一段做的事情很单纯，就是把 RCC 和 GPIOF 的状态改到我们在 3.2.1 里算好的目标值。这里用的是“读-改-写”，而不是整寄存器硬覆盖，原因也很简单：
+
+- `MODER/PUPDR/OSPEEDR/OTYPER` 都不只服务 PF6~PF8
+- 直接整口覆盖会顺手把别的 pin 也改了
+
+最后是循环点灯：
+
+```asm
+loop:
+    ldr r0, =GPIOF_BSRR
+    ldr r1, =LED_RED_BSRR
+    str r1, [r0]
+    bl delay
+
+    ldr r1, =LED_GREEN_BSRR
+    str r1, [r0]
+    bl delay
+
+    ldr r1, =LED_BLUE_BSRR
+    str r1, [r0]
+    bl delay
+
+    b loop
+
+delay:
+    ldr r2, =DELAY_COUNT
+delay_loop: 		
+    subs r2, r2, #1 
+    bne delay_loop  
+    bx lr			
+```
+
+这里刻意选 `BSRR` 而不是 `ODR`，原因前面已经提过：`BSRR` 是原子置位/复位寄存器，单次写入就能同时完成“灭两个灯，亮一个灯”。汇编里这种写法尤其顺手，因为三个颜色值本来就是现成的立即数。
+
+#### 3.2.4 编写链接脚本和Makefile
+
+##### 链接脚本`STM32F407XX_FLASH.ld`
+
+有了 `led.s` 还不够，**汇编器只负责把文本变成目标代码，不负责决定这些代码最后应该放到单片机地址空间的什么位置**。这个工作归链接器管，所以我们还需要一份链接脚本。
+
+这一点其实也和 2.1 是一条线上的问题。前面启动代码章节里我们反复强调：
+
+- 向量表必须放在启动地址
+- 栈顶地址要有确定值
+- 代码要落到 Flash 里
+
+这些都不是 `led.s` 自己能决定的，而是链接脚本决定的。很多初学者第一次学到这里，会觉得链接脚本像是“多出来的一份神秘文件”。其实它一点也不神秘。前面的 `led.s` 只是写清楚了：
+
+- 我们要访问哪些寄存器
+- 我们要怎么点灯
+- 程序从 `Reset_Handler` 开始跑
+
+但是它没有回答下面这些问题：
+
+1. `Reset_Handler` 最终会被放到 Flash 的哪个地址附近
+2. 向量表到底要放到哪里
+3. `_estack` 这个符号的值是多少
+4. 代码和常量应该进 Flash 还是进 RAM
+
+这些问题都属于“**程序布局**”问题，而不是“程序逻辑”问题。`led.s` 负责逻辑，链接脚本负责布局。
+
+对于当前这个纯汇编最小工程，链接脚本可以极限精简成：
+
+```ld
+ENTRY(Reset_Handler)
+
+MEMORY
+{
+    FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 1024K
+    RAM   (xrw) : ORIGIN = 0x20000000, LENGTH = 128K
+}
+
+_estack = ORIGIN(RAM) + LENGTH(RAM);
+
+SECTIONS
+{
+    .isr_vector :
+    {
+        . = ALIGN(4);
+        KEEP(*(.isr_vector))
+        . = ALIGN(4);
+    } > FLASH
+
+    .text :
+    {
+        . = ALIGN(4);
+        *(.text)
+        *(.text*)
+        *(.rodata)
+        *(.rodata*)
+        . = ALIGN(4);
+    } > FLASH
+}
+```
+
+下面逐行解释。
+
+```ld
+ENTRY(Reset_Handler)
+```
+
+`ENTRY` 的意思是：**告诉链接器，程序入口符号是谁**。这里入口是 `Reset_Handler`，也就是我们在 `led.s` 里定义的复位处理函数。
+
+虽然 Cortex-M 真正上电时最先依赖的是向量表第二项，但链接器自己也需要知道“这个程序以谁为入口”。所以 ELF 文件里会记录这个入口点。
+
+```ld
+MEMORY
+{
+    FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 1024K
+    RAM   (xrw) : ORIGIN = 0x20000000, LENGTH = 128K
+}
+```
+
+这一段是在描述这颗单片机的存储资源。
+
+- `MEMORY`：下面开始声明可用内存区域
+- `FLASH`、`RAM`：区域名字，后面分配段时会直接引用
+- `(rx)`：属性，`r` 表示可读，`x` 表示可执行。程序代码要从 Flash 取指执行，所以这里是 `rx`
+- `(xrw)`：可执行、可读、可写。虽然我们这里主要把 RAM 当栈空间用，但 GNU 链接脚本常常这么写
+- `ORIGIN`：起始地址
+- `LENGTH`：区域长度
+
+这两个地址和前面的内存映射图完全对应：
+
+- `0x08000000` 是片内 Flash 起始地址
+- `0x20000000` 是 SRAM 起始地址
+
+```ld
+_estack = ORIGIN(RAM) + LENGTH(RAM);
+```
+
+这一行定义了符号 `_estack`。它的含义是：**RAM 的顶部地址**。
+
+为什么栈顶放 RAM 顶部？因为 Cortex-M 的栈是向下长的。也就是说，初始时 `SP` 指向 RAM 最高地址，之后每次压栈，地址再往低地址方向移动。
+
+前面 2.1.2 讲向量表时提到过，向量表第一项必须是初始栈顶。我们在 `led.s` 里写的是：
+
+```asm
+.word _estack
+```
+
+而 `_estack` 的真实数值，正是链接脚本在这里算出来的。所以这一行虽然短，但它是**启动代码和链接脚本之间最关键的一根线**。
+
+```ld
+SECTIONS
+{
+```
+
+`SECTIONS` 表示：下面开始规定“不同段怎么摆放”。
+
+所谓段，可以理解成程序里不同种类的内容：
+
+- 向量表是一类
+- 指令代码是一类
+- 只读常量是一类
+- 全局变量又是一类
+
+我们当前这个程序足够简单，所以最终只保留了两个输出段：`.isr_vector` 和 `.text`。
+
+```ld
+    .isr_vector :
+    {
+        . = ALIGN(4);
+        KEEP(*(.isr_vector))
+        . = ALIGN(4);
+    } > FLASH
+```
+
+这一段规定了向量表怎么放。
+
+- `.isr_vector`：输出段名
+- `ALIGN(4)`：按 4 字节对齐，因为向量表本质上就是一串 32 位地址
+- `*(.isr_vector)`：把所有输入文件中的 `.isr_vector` 段收集进来
+- `KEEP(...)`：即使启用了无用段回收，也必须保留这段
+- `> FLASH`：把它放到 Flash 区域里
+
+这里最关键的是 `KEEP`。因为我们在链接选项里打开了 `--gc-sections`，链接器会尽量删掉看起来“没被引用”的段。向量表偏偏就很容易被误判，因为它不是普通函数调用链里的一环，而是**硬件上电时直接去读**。所以这里必须 `KEEP`，不然向量表有可能被顺手删掉。
+
+```ld
+    .text :
+    {
+        . = ALIGN(4);
+        *(.text)
+        *(.text*)
+        *(.rodata)
+        *(.rodata*)
+        . = ALIGN(4);
+    } > FLASH
+```
+
+这一段规定程序代码和只读常量放到哪里。
+
+- `*(.text)`、`*(.text*)`：收集代码段
+- `*(.rodata)`、`*(.rodata*)`：收集只读常量
+- `> FLASH`：全部放到 Flash 中
+
+这里为什么既写 `.text` 又写 `.text*`？因为目标文件里的段名未必只有一个简单的 `.text`。比如我们前面的 `led.s` 就有：
+
+- `.text.Reset_Handler`
+- `.text.Default_Handler`
+
+这种带后缀的段如果只写 `*(.text)`，就收不全。所以要写成通配形式。
+
+同理，`.rodata` 现在虽然还不明显，但以后只要出现常量表、字符串、只读数据，就会进这里。
+
+也正因为当前程序非常简单，我们才敢把链接脚本删到这么短。为什么可以删掉 `.data`、`.bss`、heap、TLS、C++ 构造这些段？原因不是“它们永远没用”，而是**当前这个程序根本没用到它们**。如果以后你写了：
+
+```c
+int x = 1;
+int y;
+```
+
+那么：
+
+- `x` 会进 `.data`
+- `y` 会进 `.bss`
+
+这时候链接脚本就必须重新补回 `.data/.bss`，启动代码也必须负责搬运和清零。所以链接脚本能精简到什么程度，永远取决于程序实际用了什么段。
+
+概括一下，当前这份链接脚本完成了五件事：
+
+- `ENTRY(Reset_Handler)`：告诉链接器程序入口是谁
+- `FLASH/RAM`：告诉链接器单片机有哪些可用存储区域
+- `_estack`：给向量表第一项提供初始栈顶
+- `.isr_vector > FLASH`：保证向量表放到 `0x08000000` 附近
+- `.text > FLASH`：保证代码和常量都放在 Flash
+
+##### `Makefile`编写
+
+接下来是构建和下载。虽然后面我们使用CubeMX基本上都是生成CMake的工程，但是对于这个三文件最小工程，CMake多少有一些杀鸡用牛刀了，我们直接写一个简单的Makefile，把“编译、链接、转 bin、下载、清理”这些动作组织起来，我们需要写4个Target
+
+- `all`
+  - 编译出 `ASM_LED.elf` 和 `ASM_LED.bin`
+- `flash`
+  - 通过 ST-Link 用 SWD 下载到 `0x08000000`
+- `rebuild`
+  - 先清理再重编
+- `clean`
+  - 删除 `elf/bin/map`
+
+我们现在的 Makefile 如下：
+
+```make
+TARGET := ASM_LED
+
+TOOLROOT := $(USERPROFILE)/AppData/Local/stm32cube/bundles/gnu-tools-for-stm32/14.3.1+st.2/bin
+PROGROOT := $(USERPROFILE)/AppData/Local/stm32cube/bundles/programmer/2.22.0+st.1/bin
+
+CC := $(TOOLROOT)/arm-none-eabi-gcc.exe
+OBJCOPY := $(TOOLROOT)/arm-none-eabi-objcopy.exe
+SIZE := $(TOOLROOT)/arm-none-eabi-size.exe
+PROGRAMMER := $(PROGROOT)/STM32_Programmer_CLI.exe
+
+CPU_FLAGS := -mcpu=cortex-m4 -mthumb
+ASFLAGS := $(CPU_FLAGS)
+LDFLAGS := $(CPU_FLAGS) -nostdlib -T STM32F407XX_FLASH.ld -Wl,-Map=$(TARGET).map -Wl,--gc-sections -Wl,--print-memory-usage
+FLASH_ADDR := 0x08000000
+
+.PHONY: all flash rebuild clean
+
+all: $(TARGET).elf $(TARGET).bin
+
+$(TARGET).elf: led.s STM32F407XX_FLASH.ld
+	$(CC) $(ASFLAGS) $(LDFLAGS) $< -o $@
+	$(SIZE) $@
+
+$(TARGET).bin: $(TARGET).elf
+	$(OBJCOPY) -O binary $< $@
+
+flash: $(TARGET).bin
+	$(PROGRAMMER) -c port=SWD -w $(TARGET).bin $(FLASH_ADDR) -v -rst
+
+rebuild: clean all
+
+clean:
+	powershell -NoProfile -Command "Remove-Item -Force -ErrorAction SilentlyContinue '$(TARGET).elf','$(TARGET).bin','$(TARGET).map'"
+```
+
+下面也逐段拆开说。
+
+```make
+TARGET := ASM_LED
+```
+
+这一行在定义变量 `TARGET`。Makefile 里的 `:=` 是赋值语法，意思是把右边的值直接赋给左边。后面写 `$(TARGET).elf` 时，make 会把它展开成 `ASM_LED.elf`。
+
+```make
+TOOLROOT := $(USERPROFILE)/AppData/Local/stm32cube/bundles/gnu-tools-for-stm32/14.3.1+st.2/bin
+PROGROOT := $(USERPROFILE)/AppData/Local/stm32cube/bundles/programmer/2.22.0+st.1/bin
+```
+
+这两行定义的是工具根目录：
+
+- `TOOLROOT`：GNU 工具链目录
+- `PROGROOT`：STM32CubeProgrammer 目录
+
+这里为什么不直接写 `arm-none-eabi-gcc`？因为我们前面已经实际验证过：VSCode 的 STM32 插件确实把 GNU 工具链和 STM32CubeProgrammer 下载到了本地，但**默认没有加到系统环境变量**。所以最稳妥的做法，就是直接写插件安装目录的绝对路径。
+
+```make
+CC := $(TOOLROOT)/arm-none-eabi-gcc.exe
+OBJCOPY := $(TOOLROOT)/arm-none-eabi-objcopy.exe
+SIZE := $(TOOLROOT)/arm-none-eabi-size.exe
+PROGRAMMER := $(PROGROOT)/STM32_Programmer_CLI.exe
+```
+
+这四个变量分别代表四个外部工具：
+
+- `CC`：编译兼链接命令
+- `OBJCOPY`：格式转换命令
+- `SIZE`：查看代码体积命令
+- `PROGRAMMER`：下载器命令行工具
+
+这里有个小点值得专门说一下。虽然我们处理的是汇编文件，但依然可以调用 `arm-none-eabi-gcc`。原因是：`gcc` 不只是 C 编译器，它也是整个 GNU 工具链的总入口。它能替我们把“汇编 + 链接”这两个动作串起来，省得再手动分别去敲 `as` 和 `ld`。
+
+```make
+CPU_FLAGS := -mcpu=cortex-m4 -mthumb
+ASFLAGS := $(CPU_FLAGS)
+LDFLAGS := $(CPU_FLAGS) -nostdlib -T STM32F407XX_FLASH.ld -Wl,-Map=$(TARGET).map -Wl,--gc-sections -Wl,--print-memory-usage
+FLASH_ADDR := 0x08000000
+```
+
+这一段是在整理参数。
+
+- `-mcpu=cortex-m4`：目标内核是 Cortex-M4
+- `-mthumb`：生成 Thumb 指令
+- `-nostdlib`：不要链接标准 C 库
+- `-T STM32F407XX_FLASH.ld`：明确指定链接脚本
+- `-Wl,...`：把后面的参数转交给链接器
+
+其中三条尤其重要：
+
+- `-Wl,-Map=$(TARGET).map`：生成 map 文件，方便看段布局
+- `-Wl,--gc-sections`：回收没用的段
+- `-Wl,--print-memory-usage`：打印 Flash/RAM 使用量
+
+`FLASH_ADDR := 0x08000000` 则是在给下载命令准备烧录地址。
+
+```make
+.PHONY: all flash rebuild clean
+```
+
+`.PHONY` 的意思是：后面这些名字是“动作名”，不是文件名。否则如果目录里恰好真的有个叫 `flash` 的文件，make 可能会误判成“这个目标已经存在，不用执行了”。
+
+接下来就是 Makefile 最核心的“规则”。Makefile 的规则语法长这样：
+
+```make
+目标: 依赖
+    命令
+```
+
+意思是：要得到这个目标，先确保依赖齐全，然后执行下面的命令。注意，命令前面必须是真正的 **Tab**，不是空格。
+
+先看总目标：
+
+```make
+all: $(TARGET).elf $(TARGET).bin
+```
+
+这条规则本身没有命令，它只是告诉 make：执行 `make all` 时，最终要拿到两个结果：
+
+- `ASM_LED.elf`
+- `ASM_LED.bin`
+
+如果这两个文件还不存在，make 就会继续去找生成它们的规则。
+
+再看第一条真正干活的规则：
+
+```make
+$(TARGET).elf: led.s STM32F407XX_FLASH.ld
+    $(CC) $(ASFLAGS) $(LDFLAGS) $< -o $@
+    $(SIZE) $@
+```
+
+这条规则对应 Makefile 的第一件大事：**把源文件变成 ELF**。
+
+- 目标：`ASM_LED.elf`
+- 依赖：`led.s`、`STM32F407XX_FLASH.ld`
+
+为什么链接脚本也要放在依赖里？因为只要你改了链接脚本，ELF 的布局就变了，就应该重新链接。
+
+这里还出现了两个自动变量：
+
+- `$<`：第一个依赖文件，这里就是 `led.s`
+- `$@`：当前目标文件，这里就是 `ASM_LED.elf`
+
+所以第一条命令展开后，本质上就是：
+
+```bash
+arm-none-eabi-gcc ... led.s -o ASM_LED.elf
+```
+
+第二条命令：
+
+```make
+    $(SIZE) $@
+```
+
+是为了打印代码体积。我们前面实际编译时已经看到它输出了 Flash 使用量和最终 ELF 大小。
+
+再看第二条规则：
+
+```make
+$(TARGET).bin: $(TARGET).elf
+    $(OBJCOPY) -O binary $< $@
+```
+
+这条规则对应 Makefile 的第二件大事：**把 ELF 转成 BIN**。
+
+为什么要多这一步？因为：
+
+- `ELF` 是开发格式，里面带符号表、段信息、入口信息
+- `BIN` 是纯裸二进制镜像，适合直接写入 Flash
+
+也就是说，ELF 更像“带说明书的工程产物”，BIN 更像“真正要塞进芯片里的内容”。
+
+再看下载规则：
+
+```make
+flash: $(TARGET).bin
+    $(PROGRAMMER) -c port=SWD -w $(TARGET).bin $(FLASH_ADDR) -v -rst
+```
+
+这条规则对应 Makefile 的第三件大事：**下载到板子**。
+
+这里参数的意思也要认识：
+
+- `-c port=SWD`：通过 ST-Link 的 SWD 接口连接目标板
+- `-w $(TARGET).bin $(FLASH_ADDR)`：把 bin 文件写到 `0x08000000`
+- `-v`：写完后校验
+- `-rst`：下载后复位 MCU
+
+我们前面已经实际跑过这一条命令，ST-Link 能识别，F407 也能识别，`ASM_LED.bin` 已经成功烧到了 `0x08000000`。
+
+再看重建规则：
+
+```make
+rebuild: clean all
+```
+
+这条没有命令，只有依赖。意思是：执行 `make rebuild` 时，先做 `clean`，再做 `all`。
+
+最后是清理规则：
+
+```make
+clean:
+    powershell -NoProfile -Command "Remove-Item -Force -ErrorAction SilentlyContinue '$(TARGET).elf','$(TARGET).bin','$(TARGET).map'"
+```
+
+这条规则对应 Makefile 的第四件大事：**清理构建产物**。因为我们当前在 Windows 环境里，所以这里直接调用 PowerShell 删除 `elf/bin/map` 三个文件。
+
+到这里，这份 Makefile 的四件事情就完全对上了：
+
+1. 用 `arm-none-eabi-gcc` 把 `led.s` 链接成 `ASM_LED.elf`
+   对应规则：`$(TARGET).elf: led.s STM32F407XX_FLASH.ld`
+2. 用 `objcopy` 把 `elf` 转成裸二进制 `ASM_LED.bin`
+   对应规则：`$(TARGET).bin: $(TARGET).elf`
+3. 用 `size` 查看最终代码体积
+   对应代码：`$(SIZE) $@`
+4. 用 `STM32_Programmer_CLI` 通过 ST-Link 把 `bin` 烧到 `0x08000000`
+   对应规则：`flash: $(TARGET).bin`
+
+这里还有一个现实问题值得专门说一句：VSCode 的 STM32 插件确实帮我们下载了 GNU 工具链和 STM32CubeProgrammer，但**这些工具默认不一定在系统环境变量里**。所以 Makefile 里直接写了插件安装目录下的绝对路径，避免在 PowerShell 里敲命令时还要折腾 PATH。
+
+换句话说，`led.s` 解决的是“程序怎么写”，链接脚本解决的是“程序放哪儿”，Makefile 解决的是“程序怎么编、怎么转、怎么下载”。三者缺一不可。
+
+#### 3.3 运行！！！
+
+现在make all再make flash ， 你将会看到D5闪烁了起来！
+
+恭喜你 到了现在你已经神功大成，整个stm32从硬件到软件的所有细节在你眼下都几乎是透明的了，不要说自己写库，你理论上自己做一个开发平台都是分分钟的事情。但事实上，如果你的每个32工程都是用这个方法展开，也许你技术很好，但公司可能会开除你，同事也会嫌弃你，现实中不会有人类这么写，因为stm32存在标准库（底层，但是已经停止维护）和HAL库（高封装，是ST的重点项目）两个人见人爱的大礼包，可以开袋即食。
+
+接下来我们分别按照老旧的Keil平台和MDK启动文件编写一个最小keil工程， 体验一下这个古老的破车，自己建一个库函数; 再使用便捷的HAL库点灯，感受一下人间的美好。
+
+## 4 简装房：基于启动代码建库（以MDK为例）
 
 
 

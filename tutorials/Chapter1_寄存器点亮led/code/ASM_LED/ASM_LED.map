@@ -1,0 +1,67 @@
+
+Discarded input sections
+
+ .text          0x00000000        0x0 C:\Users\mosyu\AppData\Local\Temp\ccxXwmE8.o
+ .data          0x00000000        0x0 C:\Users\mosyu\AppData\Local\Temp\ccxXwmE8.o
+ .bss           0x00000000        0x0 C:\Users\mosyu\AppData\Local\Temp\ccxXwmE8.o
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+FLASH            0x08000000         0x00100000         xr
+RAM              0x20000000         0x00020000         xrw
+*default*        0x00000000         0xffffffff
+
+Linker script and memory map
+
+LOAD C:\Users\mosyu\AppData\Local\Temp\ccxXwmE8.o
+                0x20020000                        _estack = (ORIGIN (RAM) + LENGTH (RAM))
+
+.isr_vector     0x08000000      0x188
+                0x08000000                        . = ALIGN (0x4)
+ *(.isr_vector)
+ .isr_vector    0x08000000      0x188 C:\Users\mosyu\AppData\Local\Temp\ccxXwmE8.o
+                0x08000000                g_pfnVectors
+                0x08000188                        . = ALIGN (0x4)
+
+.text           0x08000188       0xa8
+                0x08000188                        . = ALIGN (0x4)
+ *(.text)
+ *(.text*)
+ .text.Reset_Handler
+                0x08000188        0x6 C:\Users\mosyu\AppData\Local\Temp\ccxXwmE8.o
+                0x08000188                Reset_Handler
+ *fill*         0x0800018e        0x2 
+ .text.Default_Handler
+                0x08000190       0xa0 C:\Users\mosyu\AppData\Local\Temp\ccxXwmE8.o
+ *(.rodata)
+ *(.rodata*)
+                0x08000230                        . = ALIGN (0x4)
+OUTPUT(ASM_LED.elf elf32-littlearm)
+LOAD linker stubs
+
+.glue_7         0x08000230        0x0
+ .glue_7        0x08000230        0x0 linker stubs
+
+.glue_7t        0x08000230        0x0
+ .glue_7t       0x08000230        0x0 linker stubs
+
+.vfp11_veneer   0x08000230        0x0
+ .vfp11_veneer  0x08000230        0x0 linker stubs
+
+.v4_bx          0x08000230        0x0
+ .v4_bx         0x08000230        0x0 linker stubs
+
+.iplt           0x08000230        0x0
+ .iplt          0x08000230        0x0 C:\Users\mosyu\AppData\Local\Temp\ccxXwmE8.o
+
+.igot.plt       0x08000230        0x0
+ .igot.plt      0x08000230        0x0 C:\Users\mosyu\AppData\Local\Temp\ccxXwmE8.o
+
+.rel.dyn        0x08000230        0x0
+ .rel.iplt      0x08000230        0x0 C:\Users\mosyu\AppData\Local\Temp\ccxXwmE8.o
+
+.ARM.attributes
+                0x00000000       0x21
+ .ARM.attributes
+                0x00000000       0x21 C:\Users\mosyu\AppData\Local\Temp\ccxXwmE8.o
