@@ -22,6 +22,58 @@
 
 ## 0 本章节目录
 
+- [1 乡下人进城买房：初识stm32](#1-乡下人进城买房初识stm32)
+  - [1.1 STM32 的基本哲学：从 8 位 MCU 到 32 位片上系统](#11-stm32-的基本哲学从-8-位-mcu-到-32-位片上系统)
+    - [1.1.1 ARM 内核 + 片上系统 SoC：从小村庄到大城市，大一统的单片机](#111-arm-内核--片上系统-soc从小村庄到大城市大一统的单片机)
+    - [1.1.2 统一的地址空间与 Memory Map：在城里找房子，先拿地图，再找马路](#112-统一的地址空间与-memory-map在城里找房子先拿地图再找马路)
+    - [1.1.3 复杂的初始化：在城里买房子，不只是拿钥匙，还要办水电气网](#113-复杂的初始化在城里买房子不只是拿钥匙还要办水电气网)
+    - [1.1.4 总线系统和模块协同：村支书可能包办一切，但市长不可能](#114-总线系统和模块协同村支书可能包办一切但市长不可能)
+  - [1.2 Cortex-M内核](#12-cortex-m内核)
+    - [1.2.1 STM32 与 Cortex-M 的关系](#121-stm32-与-cortex-m-的关系)
+    - [1.2.2 Arm Cortex-M架构概述](#122-arm-cortex-m架构概述)
+    - [1.2.3 常用寄存器定义](#123-常用寄存器定义)
+    - [1.2.4 常见 Cortex-M 汇编指令](#124-常见-cortex-m-汇编指令)
+  - [1.3 总线和片上资源](#13-总线和片上资源)
+    - [1.3.1 总线矩阵与统一内存架构](#131-总线矩阵与统一内存架构)
+    - [1.3.2 总线：不同速度的城市道路和管网](#132-总线不同速度的城市道路和管网)
+    - [1.3.3 内存映射图（Memory Map）真的是一个Map](#133-内存映射图memory-map真的是一个map)
+- [2 买房入住须知：启动流程，时钟树，GPIO配置](#2-买房入住须知启动流程时钟树gpio配置)
+  - [2.1 STM32启动代码](#21-stm32启动代码)
+    - [2.1.1 栈与堆的定义](#211-栈与堆的定义)
+    - [2.1.2 中断向量表](#212-中断向量表)
+    - [2.1.3 Reset_Handler](#213-reset_handler)
+    - [2.1.4 默认中断处理函数](#214-默认中断处理函数)
+    - [2.1.5 WEAK 中断机制](#215-weak-中断机制)
+    - [2.1.6 启动代码在系统中的位置](#216-启动代码在系统中的位置)
+    - [2.1.7 补充：GCC版启动文件和Keil版有什么不同](#217-补充gcc版启动文件和keil版有什么不同)
+  - [2.2 时钟配置](#22-时钟配置)
+    - [2.2.1 时钟树](#221-时钟树)
+    - [2.2.2 配置时钟树](#222-配置时钟树)
+  - [2.3 GPIO](#23-gpio)
+    - [2.3.1 GPIO的电路结构和数据流向](#231-gpio的电路结构和数据流向)
+    - [2.3.2 GPIO的7种工作模式](#232-gpio的7种工作模式)
+    - [2.3.3 浅谈GPIO的等效电路模型](#233-浅谈gpio的等效电路模型)
+    - [2.3.4 GPIO寄存器速查](#234-gpio寄存器速查)
+- [3 毛坯房：纯汇编点灯（基于ST-Link下载器自建工程）](#3-毛坯房纯汇编点灯基于st-link下载器自建工程)
+  - [3.1 开发环境：运行之前是下载，下载之前是编译，编译之前是写代码](#31-开发环境运行之前是下载下载之前是编译编译之前是写代码)
+    - [3.1.1 下载和调试平台](#311-下载和调试平台)
+    - [3.1.2 工具链：编译、汇编与链接器](#312-工具链编译汇编与链接器)
+  - [3.2 啰嗦完了 开始写代码了](#32-啰嗦完了-开始写代码了)
+    - [3.2.1 寄存器行为拆解](#321-寄存器行为拆解)
+    - [3.2.2 Delay计算](#322-delay计算)
+    - [3.2.3 编写汇编文件`led.s`](#323-编写汇编文件leds)
+    - [3.2.4 编写链接脚本和Makefile](#324-编写链接脚本和makefile)
+  - [3.3 运行！！！](#33-运行)
+- [4 精装房：HAL库点灯](#4-精装房hal库点灯)
+  - [4.1 CubeMX图形化界面配置时钟和GPIO寄存器](#41-cubemx图形化界面配置时钟和gpio寄存器)
+  - [4.2 HAL库的结构](#42-hal库的结构)
+  - [4.3 GPIO](#43-gpio)
+- [5 简装房：仿 HAL 建库](#5-简装房仿-hal-建库)
+  - [5.1 程序入口](#51-程序入口)
+  - [5.2 驱动编写](#52-驱动编写)
+  - [5.3 Core 实现](#53-core-实现)
+  - [5.4 CMake 编写](#54-cmake-编写)
+
 ## 1 乡下人进城买房：初识stm32
 
 
@@ -1870,16 +1922,367 @@ clean:
 
 恭喜你 到了现在你已经神功大成，整个stm32从硬件到软件的所有细节在你眼下都几乎是透明的了，不要说自己写库，你理论上自己做一个开发平台都是分分钟的事情。但事实上，**如果你的每个32工程都是用这个方法展开，也许你技术很好，但公司可能会开除你，同事也会嫌弃你，现实中不会有人类这么写**。这是因为stm32存在标准库（底层，但是已经停止维护）和HAL库（高封装，是ST的重点项目）两个人见人爱的大礼包，可以开袋即食。
 
-接下来我们分别按照老旧的Keil平台和MDK启动文件编写一个最小keil工程， 体验一下这个古老的破车，自己建一个库函数; 再使用便捷的HAL库点灯，感受一下人间的美好。
+接下来我们先用 CubeMX 和 HAL 库点灯，感受一下人间的美好；再自己动手建一个最小的驱动库，仿照 HAL 的接口，把那层物业自己实现一遍。
 
-## 4 简装房：基于启动代码建库（以MDK为例）
+## 4 精装房：HAL库点灯
+
+### 4.1 CubeMX图形化界面配置时钟和GPIO寄存器
+
+有了之前的基础，相信你对STM32的时钟树、GPIO模式、寄存器配置已经有了相当清晰的认识。但如果你把之前写的那堆寄存器操作代码给公司同事看，他们估计会面无表情地问你："你知道有CubeMX这种东西吗？"
+
+CubeMX 是 ST 官方出品的图形化初始化代码生成器。你在界面上点几下，选芯片、配时钟、选引脚模式，它直接帮你生成好所有初始化代码骨架。不需要翻手册找寄存器的 bit 定义，不需要手写 `RCC->AHB1ENR |= (1 << 5)`。
+
+以本节工程为例，操作流程如下：
+
+1. 打开 STM32CubeMX，新建工程，搜索芯片型号 `STM32F407ZGTx`
+2. 在引脚图上找到 **PF6、PF7、PF8**，分别右键 → `GPIO_Output`
+3. 左侧 **RCC** → 时钟源保持默认 **HSI**（内部 16MHz，够用）
+4. 左侧 **Project Manager** → 工具链选 **CMake**，填好工程名和路径
+5. 点击右上角 **GENERATE CODE**
+
+生成完毕后，你会得到和 `code/HAL_LED` 完全一致的目录结构。CubeMX 同时还生成了 `.ioc` 文件——这是工程的配置文件，本质上是一个文本格式的键值表，记录了你所有的图形化配置。之后再次用 CubeMX 打开它，就能回到图形界面重新修改再重新生成。
+
+CubeMX 真正的妙处不是帮你省略了几行寄存器操作，而是它把"配置芯片"这件事做成了**可视化、可反复修改的工作流**。每次修改 `.ioc` 配置并重新生成，CubeMX 只会更新它自己管理的代码段；你写在 `/* USER CODE BEGIN */` 和 `/* USER CODE END */` 之间的代码会被完整保留。这是一种约定：**你的代码和生成的代码互不侵犯**。
+
+### 4.2 HAL库的结构
+
+HAL（Hardware Abstraction Layer）是 ST 现在全力维护的官方驱动库，和 CubeMX 深度绑定。以 CMake 工程为例，CubeMX 生成的工程有两个核心目录：`Core` 和 `Drivers`。两者职责非常清晰：
+
+- **`Core`**：这一层放的是"这个具体工程自己的东西"——程序入口、外设初始化配置、中断入口、C 运行时桥接。从应用角度看，**你最常接触和修改的代码都在这里**。
+- **`Drivers`**：这一层放的是"大家通用的底层库"——ARM 内核定义、芯片寄存器定义、HAL 驱动实现。这部分是 ST 提供的，通常不需要也不应该修改。
+
+**Core 的内部结构：**
+
+```
+Core/
+├── Inc/
+│   ├── main.h                # 工程公共头文件，引入 stm32f4xx_hal.h
+│   ├── stm32f4xx_hal_conf.h  # HAL 模块开关 + 时钟参数，决定编译哪些外设驱动
+│   └── stm32f4xx_it.h        # 中断服务函数声明
+└── Src/
+    ├── main.c                # 程序入口：HAL_Init → 时钟配置 → GPIO初始化 → while(1)
+    ├── stm32f4xx_hal_msp.c   # 外设底层初始化（时钟使能、GPIO复用），由HAL内部回调
+    ├── stm32f4xx_it.c        # 中断服务函数实现（NMI、HardFault、SysTick等）
+    ├── system_stm32f4xx.c    # 系统级初始化：SystemInit()、SystemCoreClock 变量
+    ├── syscalls.c            # C 标准库系统调用桩（printf/read/write 的后端）
+    └── sysmem.c              # 堆内存支持：_sbrk()，malloc 的底层依赖
+```
+
+**Drivers 的内部结构：**
+
+```
+Drivers/
+├── CMSIS/
+│   ├── Include/              # ARM 标准头（core_cm4.h，定义内核寄存器）
+│   └── Device/ST/STM32F4xx/  # ST 芯片头（stm32f407xx.h，定义外设寄存器结构体）
+└── STM32F4xx_HAL_Driver/
+    ├── Inc/                  # HAL 驱动头文件（stm32f4xx_hal_gpio.h 等）
+    └── Src/                  # HAL 驱动实现（stm32f4xx_hal_gpio.c 等）
+```
+
+一个典型的 include 链路是这样的：
+
+```
+main.c
+└── main.h
+    └── stm32f4xx_hal.h              ← HAL 总入口
+        └── stm32f4xx_hal_conf.h     ← 你的配置决定哪些模块被编译进来
+            └── stm32f4xx_hal_gpio.h
+                └── stm32f407xx.h    ← 芯片外设寄存器定义
+                    └── core_cm4.h   ← ARM 内核定义
+```
+
+对比一下前面的寄存器版本：那个工程里你直接操作 `GPIOF->ODR`，是在直接和"城市里的楼"打交道。而 HAL 库在这些楼外面包了一层物业——你通过物业（HAL 函数）来管理一切，底层的 `ODR`、`MODER` 寄存器操作都丢给物业去处理了。
+
+第五节我们会自己动手实现这层"物业"，让你看清楚它里面到底包了什么。
+
+### 4.3 GPIO
+
+有了工程骨架，点灯只需要一件事：在 `while(1)` 里调用 HAL GPIO 函数。
+
+HAL GPIO 提供了几个最常用的操作接口：
+
+```c
+// 写引脚：GPIO_PIN_SET = 高电平，GPIO_PIN_RESET = 低电平
+void HAL_GPIO_WritePin(GPIO_TypeDef* GPIOx, uint16_t GPIO_Pin, GPIO_PinState PinState);
+
+// 翻转引脚：1变0，0变1
+void HAL_GPIO_TogglePin(GPIO_TypeDef* GPIOx, uint16_t GPIO_Pin);
+
+// 读引脚状态
+GPIO_PinState HAL_GPIO_ReadPin(GPIO_TypeDef* GPIOx, uint16_t GPIO_Pin);
+
+// HAL 毫秒延时，依赖 SysTick 中断里的 HAL_IncTick()
+void HAL_Delay(uint32_t Delay);
+```
+
+要让 D5（PF6）每隔 500ms 翻转一次，只需在 `while(1)` 的 USER CODE 区间加两行：
+
+```c
+  while (1)
+  {
+    /* USER CODE BEGIN 3 */
+    HAL_GPIO_TogglePin(GPIOF, GPIO_PIN_6);
+    HAL_Delay(500);
+    /* USER CODE END 3 */
+  }
+```
+
+如果想明确点亮再熄灭（LED 共阳极接法，低电平亮）：
+
+```c
+HAL_GPIO_WritePin(GPIOF, GPIO_PIN_6, GPIO_PIN_RESET);  // 低电平，灯亮
+HAL_Delay(500);
+HAL_GPIO_WritePin(GPIOF, GPIO_PIN_6, GPIO_PIN_SET);    // 高电平，灯灭
+HAL_Delay(500);
+```
+
+也可以用 `|` 同时操作多个引脚：
+
+```c
+HAL_GPIO_TogglePin(GPIOF, GPIO_PIN_6 | GPIO_PIN_7 | GPIO_PIN_8);
+HAL_Delay(300);
+```
+
+和汇编版本、寄存器版本对比一下：这次你写的逻辑极少。但本质上 `HAL_GPIO_TogglePin` 最终仍然是读写 `GPIOF->ODR` 实现的，`HAL_Delay` 依赖的是 `SysTick_Handler` 里的 `HAL_IncTick()` 计数，而 `HAL_IncTick()` 就在 `stm32f4xx_it.c` 里。兜了一圈，内核还是那个内核，寄存器还是那些寄存器，只不过现在你站在了物业柜台前，而不是自己扛着工具冲进机房。
 
 
+## 5 简装房：仿 HAL 建库
 
-## 5 精装房：HAL库点灯
+第四节里，CubeMX 帮我们生成了整套代码骨架——`GPIO_InitTypeDef` 填完传进去，`GPIO_WritePin` 直接调，延时一行 `HAL_Delay`，完全不用碰寄存器。这一节我们把这层"物业"自己实现一遍。
 
-5.1 CubeMX图形化界面配置时钟和GPIO寄存器
+工程叫 `LIB_LED`，目标是和 HAL_LED 一模一样的流水灯效果，但所有驱动代码都是我们自己写的：没有 ST 的 HAL 库，没有 CubeMX 生成的代码，只有汇编启动文件 + 我们自己定义的寄存器结构体 + 两个驱动文件。
 
-​	有了之前的基础 相信你都无需借助任何教程，就能使用
+> **旁注**：ST 早期有一个叫标准库（STM32F4xx Standard Peripheral Library，又叫固件库）的驱动库，也是"结构体 + 函数"这套模式，但封装层次比 HAL 低、已停止维护。我们这节写的东西逻辑上更接近标准库，但接口名字故意和 HAL 对齐，这样对比更直观。
 
-5.2 HAL库的结构
+### 5.1 程序入口
+
+MDK/Keil 和 GCC 工具链各有一套启动文件。本工程使用的是 **GCC 版本的 `startup_stm32f407xx.s`**，和第四节 HAL_LED 用的是同一个文件，只是现在 `SystemInit()` 和所有驱动都由我们自己提供。
+
+打开它，`Reset_Handler` 的核心逻辑是：
+
+```asm
+Reset_Handler:
+    ldr   sp, =_estack          // 1. 设置栈指针
+
+    bl  SystemInit              // 2. 调用 SystemInit()（C 函数）
+
+    // 3. 把 .data 段从 Flash 搬到 RAM
+    ldr r0, =_sdata
+    ldr r1, =_edata
+    ldr r2, =_sidata
+    ...（搬运循环）
+
+    // 4. 把 .bss 段清零
+    ldr r2, =_sbss
+    ldr r4, =_ebss
+    ...（清零循环）
+
+    bl __libc_init_array        // 5. 调用 C++ 全局构造函数（C 工程里为空）
+
+    bl  main                    // 6. 跳入 main()
+    bx  lr
+```
+
+对比第三节的纯汇编版启动代码，多出来的东西是第 3、4、5 步。原因是：我们现在有 C 代码了，C 代码可能有全局变量，全局变量需要初始化。所以完整的启动代码必须处理 `.data` 和 `.bss` 两件事，否则全局变量初始值会不对或者是随机值。
+
+第三节里之所以可以省略，是因为那个纯汇编工程根本没有全局变量。
+
+另一个关键点：**这里启动文件调用的 `SystemInit()` 是我们自己在 `Core/Src/system_stm32f4xx.c` 里实现的**。启动文件定义的是调用顺序，具体做什么由我们决定。在我们的最小版本里，`SystemInit()` 只做一件事：使能 FPU。
+
+### 5.2 驱动编写
+
+第四节里你已经见过 HAL 库的 `GPIO_InitTypeDef` 和 `GPIO_WritePin`。我们仿照同样的接口从头实现一套——API 名字相同，用法相同，只是所有类型定义和寄存器结构体都由我们自己来写，而不是从 ST 的头文件里引入。
+
+最终库目录是：
+
+```
+Lib/
+├── Inc/
+│   ├── stm32f4xx.h   ← 寄存器定义（最小版）
+│   ├── gpio.h        ← GPIO 驱动接口
+│   └── rcc.h         ← RCC 时钟使能接口
+└── Src/
+    ├── gpio.c        ← GPIO 驱动实现
+    └── rcc.c         ← RCC 时钟使能实现
+```
+
+#### GPIO
+
+`stm32f4xx.h` 的核心是寄存器结构体和从地址到指针的映射：
+
+```c
+typedef struct {
+    volatile uint32_t MODER;    // 偏移 0x00
+    volatile uint32_t OTYPER;   // 偏移 0x04
+    volatile uint32_t OSPEEDR;  // 偏移 0x08
+    volatile uint32_t PUPDR;    // 偏移 0x0C
+    volatile uint32_t IDR;      // 偏移 0x10
+    volatile uint32_t ODR;      // 偏移 0x14
+    volatile uint32_t BSRR;     // 偏移 0x18
+    volatile uint32_t LCKR;     // 偏移 0x1C
+    volatile uint32_t AFR[2];   // 偏移 0x20
+} GPIO_TypeDef;
+
+#define GPIOF_BASE  (0x40020000UL + 0x1400UL)
+#define GPIOF       ((GPIO_TypeDef *) GPIOF_BASE)
+```
+
+最后一行是关键：把地址 `0x40021400` 强转成 `GPIO_TypeDef *`。之后写 `GPIOF->MODER`，编译器会计算偏移 0x00，实际访问的就是 `0x40021400`；写 `GPIOF->BSRR`，访问的就是 `0x40021418`。和汇编里那张寄存器地址表完全对应，只是表达方式变成了结构体成员而不是手算偏移。
+
+`volatile` 关键字是不可省略的：告诉编译器"这个地址的内容可能被硬件随时修改，每次都必须真正读写内存，不能用寄存器缓存"。没有 `volatile`，编译器可能把循环里的寄存器读操作优化掉。
+
+`gpio.c` 里的 `GPIO_Init()` 遍历所有被选中的引脚，对每一个引脚依次完成 MODER→OTYPER→OSPEEDR→PUPDR 的读-改-写：
+
+```c
+void GPIO_Init(GPIO_TypeDef *GPIOx, GPIO_InitTypeDef *GPIO_Init)
+{
+    uint32_t pos = 0U;
+    uint32_t temp;
+
+    while ((GPIO_Init->Pin >> pos) != 0U) {
+        if ((GPIO_Init->Pin & (1UL << pos)) == 0U) { pos++; continue; }
+
+        // MODER：每引脚 2 bit，清除旧值再写新值
+        temp  = GPIOx->MODER;
+        temp &= ~(0x3UL << (pos * 2U));
+        temp |=  ((GPIO_Init->Mode & 0x03U) << (pos * 2U));
+        GPIOx->MODER = temp;
+
+        // OTYPER / OSPEEDR / PUPDR 同理...
+        pos++;
+    }
+}
+```
+
+`GPIO_WritePin()` 用 BSRR 实现，和汇编版的理由完全一样：
+
+```c
+void GPIO_WritePin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin, GPIO_PinState PinState)
+{
+    if (PinState == GPIO_PIN_SET)
+        GPIOx->BSRR = (uint32_t)GPIO_Pin;          // 置位：写低16位
+    else
+        GPIOx->BSRR = (uint32_t)GPIO_Pin << 16U;   // 复位：写高16位
+}
+```
+
+#### RCC
+
+RCC 驱动同样先定义寄存器结构体，然后提供一个时钟使能函数。这里用了一个小技巧：根据传入的 GPIO 指针和 GPIOA 基地址做差除偏移，算出该端口在 AHB1ENR 里的 bit 位置，一个函数处理所有端口：
+
+```c
+void RCC_GPIO_ClkEnable(GPIO_TypeDef *GPIOx)
+{
+    // GPIOA 在 bit0，GPIOB 在 bit1，每个端口地址差 0x400
+    uint32_t bit = ((uint32_t)GPIOx - GPIOA_BASE) >> 10U;
+    RCC->AHB1ENR |= (1UL << bit);
+}
+```
+
+### 5.3 Core 实现
+
+`Core/` 目录只有三个文件：
+
+**`system_stm32f4xx.c`**：提供 `SystemInit()`，被启动文件在 `main()` 之前调用。我们的最小版本里只做一件事——使能 FPU：
+
+```c
+void SystemInit(void)
+{
+    // SCB->CPACR 在 0xE000ED88，CP10/CP11 字段控制 FPU 访问权限
+    *((volatile uint32_t *)0xE000ED88U) |= (0xFUL << 20U);
+}
+```
+
+为什么要上来就使能 FPU？因为 STM32F407 有硬件 FPU，但上电默认是关的。我们用 `-mfloat-abi=hard` 编译，如果 FPU 没有使能，一旦执行浮点指令就会触发 UsageFault。先在 `SystemInit()` 里打开，就不用担心后面的代码里偶然出现了浮点计算。
+
+**`main.c`**：把这段代码和第四节 HAL_LED 的 `MX_GPIO_Init()` 放在一起对比，你会发现它们几乎是一字不差，只是函数名前面少了 `HAL_` 前缀——因为我们就是照着 HAL 的接口设计的：
+
+```c
+int main(void)
+{
+    LED_Init();
+    while (1) {
+        GPIO_WritePin(GPIOF, GPIO_PIN_6, GPIO_PIN_RESET);  // R 亮
+        delay_ms(500);
+        GPIO_WritePin(GPIOF, GPIO_PIN_6, GPIO_PIN_SET);    // R 灭
+        // G、B 同理...
+    }
+}
+
+static void LED_Init(void)
+{
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    RCC_GPIO_ClkEnable(GPIOF);
+    GPIO_WritePin(GPIOF, GPIO_PIN_6 | GPIO_PIN_7 | GPIO_PIN_8, GPIO_PIN_SET);
+    GPIO_InitStruct.Pin   = GPIO_PIN_6 | GPIO_PIN_7 | GPIO_PIN_8;
+    GPIO_InitStruct.Mode  = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull  = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    GPIO_Init(GPIOF, &GPIO_InitStruct);
+}
+```
+
+**HAL 的初始化接口本身并不神秘，它就是这套结构体驱动模式的标准实现。**
+
+### 5.4 CMake 编写
+
+LIB_LED 的 CMakeLists.txt 比 HAL_LED 干净很多，因为不用再管 CubeMX 的子目录，一个顶层文件就够了：
+
+```cmake
+add_executable(LIB_LED
+    startup_stm32f407xx.s       # 启动文件
+    Core/Src/system_stm32f4xx.c # SystemInit
+    Core/Src/main.c             # 应用逻辑
+
+    Lib/Src/rcc.c               # 自建 RCC 驱动
+    Lib/Src/gpio.c              # 自建 GPIO 驱动
+)
+
+target_include_directories(LIB_LED PRIVATE
+    Core/Inc
+    Lib/Inc
+)
+```
+
+链接脚本和工具链文件与 HAL_LED 完全相同，复用即可。唯一的差别是链接器参数里加了 `--specs=nosys.specs`，它会提供 `_read`、`_write` 等系统调用的空桩实现，这样不需要像 HAL_LED 那样单独维护 `syscalls.c`。
+
+工程构建流程：
+
+```bash
+cmake --preset Debug
+cmake --build build/Debug
+```
+
+编译完成后，`build/Debug/LIB_LED.elf` 就是带调试符号的可执行文件，用 ST-Link 烧录 `.bin` 后就能看到和 HAL_LED 完全相同的流水灯效果。
+
+最终工程结构：
+
+```
+LIB_LED/
+├── CMakeLists.txt
+├── CMakePresets.json
+├── startup_stm32f407xx.s       ← 与 HAL_LED 共用
+├── STM32F407XX_FLASH.ld        ← 与 HAL_LED 共用
+├── cmake/
+│   └── gcc-arm-none-eabi.cmake ← 与 HAL_LED 共用
+├── Core/
+│   ├── Inc/main.h
+│   └── Src/
+│       ├── main.c
+│       └── system_stm32f4xx.c
+└── Lib/                        ← 自建驱动库（本节重点）
+    ├── Inc/
+    │   ├── stm32f4xx.h         ← 寄存器结构体
+    │   ├── gpio.h              ← GPIO 接口
+    │   └── rcc.h               ← RCC 接口
+    └── Src/
+        ├── gpio.c              ← GPIO 实现
+        └── rcc.c               ← RCC 实现
+```
+
+和第三节纯汇编工程对比，改变的只是**表达方式**，而不是**系统行为**：同样的 Flash 地址、同样的向量表、同样的 BSRR 写入，只是从手写立即数变成了通过结构体指针访问。
+
+和第四节的 HAL_LED 对比，函数名字几乎一样，行为完全相同，只是换掉了底层的实现——HAL 用的是 ST 的 `stm32f407xx.h` 和几千行驱动代码，我们用的是自己写的一百多行。
+
+这就是所谓"建库"的本质：不是发明新东西，而是用更容易维护的形式组织已有的硬件操作。
