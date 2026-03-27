@@ -97,6 +97,17 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    HAL_GPIO_WritePin(GPIOF, GPIO_PIN_6, GPIO_PIN_RESET);  // 低电平，灯亮
+    HAL_Delay(500);
+    HAL_GPIO_WritePin(GPIOF, GPIO_PIN_6, GPIO_PIN_SET);    // 高电平，灯灭
+
+    HAL_GPIO_WritePin(GPIOF, GPIO_PIN_7, GPIO_PIN_RESET);  // 低电平，灯亮
+    HAL_Delay(500);
+    HAL_GPIO_WritePin(GPIOF, GPIO_PIN_7, GPIO_PIN_SET);    // 高电平，灯灭
+
+    HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);  // 低电平，灯亮
+    HAL_Delay(500);
+    HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);    // 高电平，灯灭
   }
   /* USER CODE END 3 */
 }
@@ -187,6 +198,7 @@ void Error_Handler(void)
   __disable_irq();
   while (1)
   {
+
   }
   /* USER CODE END Error_Handler_Debug */
 }
