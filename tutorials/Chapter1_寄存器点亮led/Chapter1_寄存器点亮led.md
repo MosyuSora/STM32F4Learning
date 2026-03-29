@@ -1,4 +1,4 @@
-# Chapter 1 寄存器点亮led
+﻿# Chapter 1 寄存器点亮led
 
 ---
 
@@ -460,7 +460,7 @@ STM32的所有外设都挂载在总线上，分为APB(Advanced Peripheral Bus)�
 
 ### 2.1 STM32启动代码
 
-学会启动流程，如同搬新家得先找到小区门口去物业办门禁，我们需要知道我们的程序需要满足哪些最小条件才能启动。在 STM32 工程中，启动流程是一个汇编文件。[在这里](code/ref/startup_stm32f40xx.s)你可以找到这个文件。强烈建议一边汇编代码看一边阅读本章节。虽然大部分读者应该是“谈汇编色变”，但文档里面有保姆级的注释，不用担心。
+学会启动流程，如同搬新家得先找到小区门口去物业办门禁，我们需要知道我们的程序需要满足哪些最小条件才能启动。在 STM32 工程中，启动流程是一个汇编文件。[在这里](code/cubemx_min/led_minimum/startup_stm32f407xx.s)你可以找到这个文件。强烈建议一边汇编代码看一边阅读本章节。虽然大部分读者应该是“谈汇编色变”，但文档里面有保姆级的注释，不用担心。
 
 这个文件也就百来行，只不过完成了几件下面事情：
 
@@ -477,47 +477,19 @@ STM32的所有外设都挂载在总线上，分为APB(Advanced Peripheral Bus)�
 
 #### 2.1.1 栈与堆的定义
 
-文件最开始定义了程序运行时使用的栈和堆：
+GCC 版启动文件**不在汇编里分配栈**。栈的大小和位置完全由链接脚本（`.ld` 文件）决定，启动文件只是在文件开头引用了几个链接脚本导出的符号：
 
-```
-Stack_Size      EQU     0x00000400
-AREA    STACK, NOINIT, READWRITE, ALIGN=3
-Stack_Mem       SPACE   Stack_Size
-__initial_sp
-```
-
-这里做了三件事情：
-
-1 **定义栈大小**
-
-```
-Stack_Size = 0x400
+```asm
+.word  _sidata    /* .data 段在 FLASH 中的初始值起始地址 */
+.word  _sdata     /* .data 段在 RAM 中的起始地址 */
+.word  _edata     /* .data 段在 RAM 中的结束地址 */
+.word  _sbss      /* .bss 段在 RAM 中的起始地址 */
+.word  _ebss      /* .bss 段在 RAM 中的结束地址 */
 ```
 
-​	也就是 **1KB 栈空间**。
+栈顶地址是 `_estack`，同样由链接脚本计算（= RAM 末尾地址），直接用在向量表第一项和 `Reset_Handler` 的第一条指令里。Cortex-M 规定：启动时 CPU 会把向量表第一个值加载到 **MSP（主栈指针）**，因此程序一开始就有了可用的栈。
 
-**2 在内存中预留一段区域用于作为运行时栈。**
-
-```
-SPACE Stack_Size
-```
-
-
-
-**3 定义栈顶地址**
-
-```
-__initial_sp
-```
-
-这个符号稍后会被放进 **中断向量表** 的第一项。Cortex-M 规定：启动时 CPU 会把向量表第一个值加载到 **MSP（主栈指针）**，因此程序一开始就有了可用的栈。后面还有类似的代码定义堆：
-
-```
-Heap_Size       EQU     0x00000200
-AREA    HEAP, NOINIT, READWRITE, ALIGN=3
-```
-
-如果你很少使用 `malloc`，堆可以设置得很小。
+堆也不在启动文件里分配，由链接脚本的 `HEAP` 段负责。如果你不用 `malloc`，可以在链接脚本里把堆大小设为 0。
 
 ------
 
@@ -525,48 +497,46 @@ AREA    HEAP, NOINIT, READWRITE, ALIGN=3
 
 接下来是启动文件中最重要的一部分：
 
-```
-AREA    RESET, DATA, READONLY
-EXPORT  __Vectors
+```asm
+  .section  .isr_vector, "a", %progbits
+g_pfnVectors:
 ```
 
-这里定义的是 **中断向量表（Vector Table）**。
+`.section .isr_vector` 告诉链接器把这段数据放在 FLASH 最开头，链接脚本里的 `KEEP(*(.isr_vector))` 保证它不被优化掉。
 
 向量表的开头如下：
 
-```
-__Vectors
-    DCD __initial_sp
-    DCD Reset_Handler
-    DCD NMI_Handler
-    DCD HardFault_Handler
+```asm
+g_pfnVectors:
+  .word  _estack          /* 0x00000000：初始栈顶 */
+  .word  Reset_Handler    /* 0x00000004：复位入口 */
+  .word  NMI_Handler
+  .word  HardFault_Handler
 ```
 
 这几行非常关键。CPU 上电以后会做两件事：
 
-1. 读取地址 `0x00000000`
-    → 设置 **MSP**
-2. 读取地址 `0x00000004`
-    → 跳转到 **Reset_Handler**
+1. 读取地址 `0x00000000` → 设置 **MSP**
+2. 读取地址 `0x00000004` → 跳转到 **Reset_Handler**
 
 也就是说：
 
 ```
-0x00000000 → 初始栈顶
-0x00000004 → 程序入口
+0x00000000 → 初始栈顶（_estack，由链接脚本定义）
+0x00000004 → 程序入口（Reset_Handler）
 ```
 
-这就是为什么向量表的第一项是`__initial_sp`，第二项是`Reset_Handler`，后面则是各种异常和中断入口：
+这就是为什么向量表的第一项是 `_estack`，第二项是 `Reset_Handler`，后面则是各种异常和中断入口：
 
-```
-HardFault_Handler
-SysTick_Handler
-USART1_IRQHandler
-TIM2_IRQHandler
-...
+```asm
+  .word  HardFault_Handler
+  .word  SysTick_Handler
+  .word  USART1_IRQHandler
+  .word  TIM2_IRQHandler
+  ...
 ```
 
-每个中断都对应一个函数地址。当硬件产生中断时，CPU 会：根据中断号1.查向量表2.跳转到对应函数
+每个中断都对应一个函数地址。当硬件产生中断时，CPU 会：根据中断号 1. 查向量表，2. 跳转到对应函数。
 
 ------
 
@@ -574,41 +544,77 @@ TIM2_IRQHandler
 
 真正的启动逻辑在这里：
 
-```
-Reset_Handler PROC
-```
-
-核心代码只有几行：
-
-```
-IMPORT SystemInit
-IMPORT __main
-
-LDR R0, SystemInit
-BLX R0
-
-LDR R0, =__main
-BX R0
+```asm
+  .section  .text.Reset_Handler
+  .weak  Reset_Handler
+Reset_Handler:
 ```
 
-这段代码完成两个步骤：
+GCC 版的 Reset_Handler 比 Keil 版更直白——它自己动手把 C 运行环境初始化好，而不是丢给运行库。完整步骤如下：
 
-**第一步：调用 SystemInit()**
+**第一步：设置栈指针**
 
-`SystemInit()`是启动代码给用户的第一个接口，他运行完即结束。
+```asm
+  ldr   sp, =_estack
+```
+
+把栈指针指向链接脚本定义的 RAM 末尾地址。Cortex-M 的栈是向下增长的，所以从最高地址开始。
 
 ------
 
-**第二步：进入 C 运行库**
+**第二步：调用 SystemInit()**
 
-接下来进入`__main`.注意这里不是 `main`。逆向过C工程的或许知道，`__main` 是 **C 运行库入口函数**。`main`才是`main()`的入口。运行前者包括了运行后者
+```asm
+  bl  SystemInit
+```
 
-`__main`会完成：
+`SystemInit()` 在 `system_stm32f4xx.c` 里实现，负责配置系统时钟和向量表偏移（VTOR）。它运行完即返回。
 
-1. 初始化 `.data` 段
-2. 清零 `.bss` 段
-3. 初始化 C 运行环境
-4. 最终调用`main()`
+------
+
+**第三步：把 `.data` 段从 FLASH 拷贝到 RAM**
+
+有初始值的全局变量（如 `int x = 5;`）的初始值存在 FLASH 里，但程序运行时要从 RAM 里读写。所以启动时需要把这些值从 FLASH 搬到 RAM：
+
+```asm
+  ldr r0, =_sdata   /* RAM 目标起始 */
+  ldr r1, =_edata   /* RAM 目标结束 */
+  ldr r2, =_sidata  /* FLASH 源起始 */
+  /* 循环：while (dst < end) *dst++ = *src++; */
+```
+
+------
+
+**第四步：把 `.bss` 段清零**
+
+未初始化的全局/静态变量（如 `int y;`）按 C 标准应该是 0，这一步把它们所在的 RAM 区域全部清零：
+
+```asm
+  ldr r2, =_sbss
+  ldr r4, =_ebss
+  /* 循环：while (dst < end) *dst++ = 0; */
+```
+
+------
+
+**第五步：调用 C++ 全局构造函数**
+
+```asm
+  bl __libc_init_array
+```
+
+如果你用了 C++ 全局对象，它的构造函数在这里被调用。纯 C 项目里这一步是空操作，但照样要调用。
+
+------
+
+**第六步：跳转到 main()**
+
+```asm
+  bl  main
+  bx  lr
+```
+
+注意这里直接调用 `main`，而不是 Keil 版里的 `__main`（C 运行库入口）。因为前面几步已经把运行库该做的事情都做完了。
 
 所以完整流程是：
 
@@ -618,55 +624,53 @@ BX R0
 向量表
 ↓
 Reset_Handler
-↓
-SystemInit()
-↓
-__main
-↓
-main()
+  ├─ ldr sp, =_estack
+  ├─ SystemInit()
+  ├─ 拷贝 .data
+  ├─ 清零 .bss
+  ├─ __libc_init_array()
+  └─ main()
 ```
 
 ------
 
 #### 2.1.4 默认中断处理函数
 
-启动文件还定义了一系列默认中断：
+启动文件定义了一个统一的默认处理函数 `Default_Handler`，所有未被用户实现的中断都会落到这里：
 
-```
-NMI_Handler
-HardFault_Handler
-MemManage_Handler
-BusFault_Handler
-```
-
-默认实现非常简单：
-
-```
-B .
+```asm
+  .section  .text.Default_Handler, "ax", %progbits
+Default_Handler:
+Infinite_Loop:
+  b  Infinite_Loop
 ```
 
-意思是跳回自身，也就是**死循环**。这样设计的好处是：程序出现异常时，CPU 会停在这里，你可以在调试器里看到程序卡住的位置，从而定位问题。
+`b Infinite_Loop` 就是跳到自己，形成**死循环**。这样设计的好处是：程序出现异常时，CPU 会停在这里，你可以在调试器里暂停后看到 PC 指向哪里，从而定位是哪个中断没有被实现或者被误触发了。
 
 ------
 
 #### 2.1.5 WEAK 中断机制
 
-在文件后面可以看到大量这样的声明：
+在文件后面可以看到大量成对出现的声明：
 
-```
-EXPORT USART1_IRQHandler [WEAK]
+```asm
+  .weak      USART1_IRQHandler
+  .thumb_set USART1_IRQHandler, Default_Handler
 ```
 
-`WEAK` 的意思是 **弱符号**。它允许用户在 C 文件中写同名函数来覆盖默认实现，例如：
+这两行合在一起的意思是：**把 `USART1_IRQHandler` 声明为 `Default_Handler` 的弱别名**。
 
-```
+- 如果用户没有在 C 文件里实现 `USART1_IRQHandler`，链接器就用 `Default_Handler`（死循环）填充向量表对应位置。
+- 如果用户写了同名函数：
+
+```c
 void USART1_IRQHandler(void)
 {
     // 用户自己的中断代码
 }
 ```
 
-链接器会自动用你的函数替换掉启动文件中的默认版本。这样既保证默认情况下程序可以编译运行，用户又可以自由实现中断。这是 STM32 启动代码中非常常见的一种设计。
+链接器会自动用用户的**强符号**替换掉这里的弱别名，向量表里对应位置就变成了用户函数的地址。这样既保证默认情况下程序可以编译运行，用户又可以自由实现中断。这是 STM32 启动代码中非常常见的一种设计。
 
 ------
 
@@ -709,43 +713,31 @@ main()
 
 ------
 
-#### 2.1.7 补充：GCC版启动文件和Keil版有什么不同
+#### 2.1.7 补充：Keil版启动文件和GCC版有什么不同
 
-前面我们讲解启动流程时，用的是 Keil/MDK 风格的启动文件，因为它的结构更规整，比较适合作为入门材料。不过如果你看Keil CubeMX生成的工程，会发现它用的是一份 GCC 版启动文件：[在这里](code/cubemx_min/led_minimum/startup_stm32f407xx.s)。
+如果你以后接触 Keil/MDK 工程，会发现它用的是另一套语法的启动文件。[在这里](code/ref/startup_stm32f40xx.s)可以找到 Keil 版的例子。
 
-这两份文件完成的任务本质上是一样的，都是为了把 MCU 从“刚上电”的状态带到“可以运行 `main()`”的状态，只不过**分工方式不同**。
+这两份文件完成的任务本质上是一样的，都是为了把 MCU 从上电状态带到可以运行 `main()` 的状态，只不过**分工方式不同**。
 
-Keil 版的特点是：
+Keil 版更像先把流程交给物业，它的特点是：
 
-- 在启动文件里直接定义栈和堆
-- 在 `Reset_Handler` 里主要调用 `SystemInit()`
-- 然后跳到 `__main`
-- 再由 Keil 的 C 运行库去完成 `.data` 初始化、`.bss` 清零等工作
+- **在启动文件里直接分配栈和堆**，用 `SPACE` 指令在汇编里预留内存
+- 栈顶符号叫 `__initial_sp`，直接写进向量表第一项
+- `Reset_Handler` 里只调用 `SystemInit()`，然后跳到 `__main`
+- **`.data` 初始化、`.bss` 清零由 Keil C 运行库的 `__main` 内部完成**，用户看不到这个过程
+- 弱符号写法是 `EXPORT USART1_IRQHandler [WEAK]`（单行搞定）
 
-GCC 版则更“直白”一点。它通常不在启动文件里自己分配栈堆，而是依赖链接脚本（`.ld` 文件）提供 `_estack`、`_sdata`、`_edata`、`_sbss`、`_ebss` 这些符号。然后在 `Reset_Handler` 里自己完成下面这些工作：
+GCC 版更像自己把搬家具、通水电这些事情一件件做完，前面各节已经详细讲了。
 
-1. 设置栈指针 `sp`
-2. 调用 `SystemInit()`
-3. 把 `.data` 段从 FLASH 拷贝到 RAM
-4. 把 `.bss` 段清零
-5. 调用 `__libc_init_array`
-6. 跳转到 `main()`
-
-所以你可以简单记：
-
-- **Keil版**：很多运行时初始化工作藏在 `__main` 里面
-- **GCC版**：很多运行时初始化工作直接写在 `Reset_Handler` 里面
-
-这也是为什么你会看到，Keil 版启动文件更像“先把流程交给物业”，而 GCC 版更像“自己把搬家具、通水电这些事情一件件做完”。
-
-不过不要被语法差异吓到。无论是 `AREA`、`DCD`、`EXPORT [WEAK]`，还是 `.section`、`.word`、`.weak`、`.thumb_set`，说到底都只是不同工具链下的不同写法。它们背后的系统逻辑并没有变：
+不要被语法差异吓到。无论是 `AREA`、`DCD`、`EXPORT [WEAK]`，还是 `.section`、`.word`、`.weak`、`.thumb_set`，说到底都只是不同工具链下的不同写法。它们背后的系统逻辑并没有变：
 
 - 先准备栈
 - 再进入复位处理函数
 - 初始化运行环境
 - 最后调用 `main()`
 
-所以，前面按 Keil 版建立起对启动流程的整体理解，后面再去看 GCC 版，其实只是“换了一套方言”，不是换了一套世界观。
+以后再去看 Keil 版，其实只是换了一套方言，不是换了一套世界观。
+
 
 ### 2.2 时钟配置
 
