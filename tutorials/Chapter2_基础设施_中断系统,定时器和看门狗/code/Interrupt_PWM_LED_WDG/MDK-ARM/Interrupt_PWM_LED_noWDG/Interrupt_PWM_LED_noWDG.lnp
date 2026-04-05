@@ -1,0 +1,25 @@
+--cpu=Cortex-M4.fp.sp
+"interrupt_pwm_led_nowdg\startup_stm32f407xx.o"
+"interrupt_pwm_led_nowdg\main.o"
+"interrupt_pwm_led_nowdg\stm32f4xx_it.o"
+"interrupt_pwm_led_nowdg\stm32f4xx_hal_msp.o"
+"interrupt_pwm_led_nowdg\stm32f4xx_hal_tim.o"
+"interrupt_pwm_led_nowdg\stm32f4xx_hal_tim_ex.o"
+"interrupt_pwm_led_nowdg\stm32f4xx_hal_rcc.o"
+"interrupt_pwm_led_nowdg\stm32f4xx_hal_rcc_ex.o"
+"interrupt_pwm_led_nowdg\stm32f4xx_hal_flash.o"
+"interrupt_pwm_led_nowdg\stm32f4xx_hal_flash_ex.o"
+"interrupt_pwm_led_nowdg\stm32f4xx_hal_flash_ramfunc.o"
+"interrupt_pwm_led_nowdg\stm32f4xx_hal_gpio.o"
+"interrupt_pwm_led_nowdg\stm32f4xx_hal_dma_ex.o"
+"interrupt_pwm_led_nowdg\stm32f4xx_hal_dma.o"
+"interrupt_pwm_led_nowdg\stm32f4xx_hal_pwr.o"
+"interrupt_pwm_led_nowdg\stm32f4xx_hal_pwr_ex.o"
+"interrupt_pwm_led_nowdg\stm32f4xx_hal_cortex.o"
+"interrupt_pwm_led_nowdg\stm32f4xx_hal.o"
+"interrupt_pwm_led_nowdg\stm32f4xx_hal_exti.o"
+"interrupt_pwm_led_nowdg\system_stm32f4xx.o"
+--strict --scatter "Interrupt_PWM_LED_noWDG\Interrupt_PWM_LED_noWDG.sct"
+--summary_stderr --info summarysizes --map --load_addr_map_info --xref --callgraph --symbols
+--info sizes --info totals --info unused --info veneers
+--list "Interrupt_PWM_LED_noWDG.map" -o Interrupt_PWM_LED_noWDG\Interrupt_PWM_LED_noWDG.axf
