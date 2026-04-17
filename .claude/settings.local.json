@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C c:/code/stm32/STM32F4Learning count-objects -vH)",
+      "Bash(.venv/Scripts/pip.exe install *)",
+      "Bash(python3 -c \"import sys; [print\\(l.rstrip\\(\\)\\) for l in sys.stdin if len\\(l.split\\(\\\\\"'\\\\\"\\)[1]\\) != 7 and l.split\\(\\\\\"'\\\\\"\\)[1].startswith\\('#'\\)]\")",
+      "Bash(python gen_diagrams.py)",
+      "Bash(python -c ' *)"
+    ]
+  }
+}
