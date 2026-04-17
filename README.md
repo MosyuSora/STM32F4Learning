@@ -32,7 +32,7 @@
 |:---:|------|:---:|
 | 1 | [寄存器点亮 LED](tutorials/Chapter1_寄存器点亮led/Chapter1_寄存器点亮led.md) | ✅ |
 | 2 | [基础设施：中断系统、定时器和看门狗](tutorials/Chapter2_基础设施_中断系统,定时器和看门狗/Chapter2_基础设施_中断系统,定时器和看门狗.md) | ✅ |
-| 3 | [外设串讲：三大低速协议和 ADC](tutorials/Chapter3_外设串讲_三大低速协议和ADC/Chapter3_外设串讲_三大低速协议和ADC.md) | 📝 |
+| 3 | [外设串讲：通信协议（UART · SPI · I²C · CAN）](tutorials/Chapter3_外设串讲_通信协议和ADC/Chapter3_外设串讲_通信协议和ADC.md) | 📝 |
 | 4 | [玩转总线：DMA 和 FSMC](tutorials/Chapter4_玩转总线_DMA和FSMC/Chapter4_玩转总线_DMA和FSMC.md) | 📝 |
 | 5 | [手搓 FreeRTOS：内核基石与静态任务管理](tutorials/Chapter5_手搓FreeRTOS_内核基石与静态任务管理/Chapter5_手搓FreeRTOS_内核基石与静态任务管理.md) | 📝 |
 | 6 | [手搓 FreeRTOS：进程模型与定时](tutorials/Chapter6_手搓FreeRTOS_进程模型与定时/Chapter6_手搓FreeRTOS_进程模型与定时.md) | 📝 |
