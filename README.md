@@ -30,7 +30,22 @@
 │   │   ├── code/                       # DMA_UART_TX + FSMC_SRAM_RW
 │   │   ├── gen_images.py               # 插图生成脚本
 │   │   └── img/
-│   ├── Chapter5 ~ Chapter9 …           # 后续章节（持续更新中）
+│   ├── Chapter5_C语言面向对象工程架构基础/
+│   │   ├── Chapter5_C语言面向对象工程架构基础.md
+│   │   ├── code/
+│   │   └── img/
+│   ├── Chapter6_手搓FreeRTOS_内核基石与静态任务管理/
+│   │   ├── Chapter6_手搓FreeRTOS_内核基石与静态任务管理.md
+│   │   ├── code/
+│   │   └── img/
+│   ├── Chapter7_手搓FreeRTOS_进程模型与定时/
+│   │   ├── Chapter7_手搓FreeRTOS_进程模型与定时.md
+│   │   ├── code/
+│   │   └── img/
+│   ├── Chapter8_手搓FreeRTOS_进程同步和信号量/
+│   │   ├── Chapter8_手搓FreeRTOS_进程同步和信号量.md
+│   │   ├── code/
+│   │   └── img/
 │
 └── README.md                           # 本文件
 ```
@@ -43,11 +58,10 @@
 | 2 | [基础设施：中断系统、定时器和看门狗](tutorials/Chapter2_基础设施_中断系统,定时器和看门狗/Chapter2_基础设施_中断系统,定时器和看门狗.md) | ✅ |
 | 3 | [外设串讲：通信协议（UART · SPI · I²C · CAN）](tutorials/Chapter3_外设串讲_通信协议和ADC/Chapter3_外设串讲_通信协议和ADC.md) | ✅ |
 | 4 | [玩转总线：DMA 和 FSMC](tutorials/Chapter4_玩转总线_DMA和FSMC/Chapter4_玩转总线_DMA和FSMC.md) | ✅ |
-| 5 | [手搓 FreeRTOS：内核基石与静态任务管理](tutorials/Chapter5_手搓FreeRTOS_内核基石与静态任务管理/Chapter5_手搓FreeRTOS_内核基石与静态任务管理.md) | 📝 |
-| 6 | [手搓 FreeRTOS：进程模型与定时](tutorials/Chapter6_手搓FreeRTOS_进程模型与定时/Chapter6_手搓FreeRTOS_进程模型与定时.md) | 📝 |
-| 7 | [手搓 FreeRTOS：进程同步和信号量](tutorials/Chapter7_手搓FreeRTOS_进程同步和信号量/Chapter7_手搓FreeRTOS_进程同步和信号量.md) | 📝 |
-| 8 | [硬实时开发基础：状态机和前后台系统](tutorials/Chapter8_硬实时开发基础_状态机和前后台系统/Chapter8_硬实时开发基础_状态机和前后台系统.md) | 📝 |
-| 9 | [硬实时开发进阶：计算模型和同步数据流](tutorials/Chapter9_硬实时开发进阶_计算模型和同步数据流/Chapter9_硬实时开发进阶_计算模型和同步数据流.md) | 📝 |
+| 5 | [C语言面向对象工程架构基础](tutorials/Chapter5_C语言面向对象工程架构基础/Chapter5_C语言面向对象工程架构基础.md) | 📝 |
+| 6 | [手搓 FreeRTOS：内核基石与静态任务管理](tutorials/Chapter6_手搓FreeRTOS_内核基石与静态任务管理/Chapter6_手搓FreeRTOS_内核基石与静态任务管理.md) | 📝 |
+| 7 | [手搓 FreeRTOS：进程模型与定时](tutorials/Chapter7_手搓FreeRTOS_进程模型与定时/Chapter7_手搓FreeRTOS_进程模型与定时.md) | 📝 |
+| 8 | [手搓 FreeRTOS：进程同步和信号量](tutorials/Chapter8_手搓FreeRTOS_进程同步和信号量/Chapter8_手搓FreeRTOS_进程同步和信号量.md) | 📝 |
 
 > ✅ 已完成 &nbsp;|&nbsp; 📝 编写中
 

@@ -1,0 +1,16 @@
+# Claude 本地配置与笔记（不进 git）
+.claude/
+
+# Python 虚拟环境
+.venv/
+
+# macOS
+.DS_Store
+
+# 编译产物
+*.o
+*.d
+*.elf
+*.bin
+*.hex
+*.map
