@@ -1,0 +1,22 @@
+1．可以直接使用我们编译好的dnw可执行程序:
+   先把dnw放入ubuntu的/usr/bin目录
+   然后修改属性:
+   sudo chmod +x /usr/bin/dnw
+   最后参考"dnw使用说明.txt"
+   
+2. 我们也提供了源码, 你可以尝试自己编译:
+2.1 先编译libusb1.0库:
+    tar xjf libusb-1.0.21.tar.bz2
+	cd libusb-1.0.21
+	./configure --enable-udev=no
+	make
+
+2.2 把库文件、头文件取出来:	
+	cp  libusb-1.0.21/libusb/.libs/libusb-1.0.a    <dnw.c的目录>
+	cp  libusb-1.0.21/libusb/libusb.h              <dnw.c的目录>
+
+2.3 编译dnw:
+    cd 	<dnw.c的目录>
+	make
+	
+	

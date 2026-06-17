@@ -1,0 +1,32 @@
+{
+  "board_info": {
+    "rs232": [
+      "ttymxc0"
+    ], 
+    "rs485": [
+      "ttymxc2"
+    ], 
+    "can": [
+      ""
+    ], 
+    "led": {
+      "100ask:blue:cpu0": "LED2 User"
+    }, 
+    "system": {
+      "HMI_version": "MEasy HMI V1.1", 
+      "linux_version": "linux-4.9.88", 
+      "uboot_version": "u-boot-2017.03", 
+      "gcc_version": "gcc-linaro-arm-linux-gnueabihf-6.2.1", 
+      "manufacturer": "Shenzhen 100ask Technology Co.", 
+      "board": "100ASK i.MX6ULL", 
+      "CPU": "i.MX6ULL", 
+      "memory": "512MB", 
+      "storage": "4G"
+    }
+  }, 
+  "dbus_info": {
+    "dbus_name": "com.myirtech.mxde", 
+    "dbus_path": "/com/myirtech/mxde", 
+    "dbus_interface": "com.myirtech.mxde.MxdeInterface"
+  }
+}

@@ -1,0 +1,38 @@
+/*
+ * 100ask IMX6ULL 14x14 — 自定义扩展设备树
+ * 不修改原厂 DTS，只追加自己的节点
+ */
+
+#include "100ask_imx6ull-14x14.dts"
+
+/* ===== PCA9555 I2C GPIO 扩展 ===== */
+&i2c1 {
+    pca9555: gpio@20 {
+        compatible = "nxp,pca9555";
+        reg = <0x20>;
+        gpio-controller;
+        #gpio-cells = <2>;
+    };
+};
+
+/* ===== GPIO-LED：PCA9555 P04 接 LED ===== */
+/ {
+    pca_leds {
+        compatible = "gpio-leds";
+
+        led_pca_p04 {
+            label = "pca:led0";               /* 在 /sys/class/leds/ 下的名字 */
+            gpios = <&pca9555 4 GPIO_ACTIVE_LOW>; /* P04，低电平点亮 */
+            default-state = "off";            /* 默认熄灭 */
+        };
+
+        /* 再加一个 P05 做呼吸灯，需要 pwm-leds 驱动（本期不用） */
+        /* led_pca_p05 {
+            label = "pca:led1";
+            gpios = <&pca9555 5 GPIO_ACTIVE_LOW>;
+            default-state = "off";
+        }; */
+    };
+};
+
+/* ===== 后续在这里追加其他外设 ===== */

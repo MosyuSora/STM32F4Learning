@@ -1,0 +1,26 @@
+/*
+ * 扩展设备树：PCA9555 + 自定义 LED 节点
+ * 编译后覆盖开发板 /boot/ 下的 dtb
+ */
+
+#include "100ask_imx6ull-14x14.dts"
+
+/* ── I2C-0 上的 PCA9555 GPIO 扩展器 ── */
+&i2c1 {
+    pca9555: gpio@20 {
+        compatible = "nxp,pca9555";
+        reg = <0x20>;
+        gpio-controller;
+        #gpio-cells = <2>;
+    };
+};
+
+/* ── 自定义 LED 设备：匹配 pca_led_drv.ko ── */
+/ {
+    pca_led_dev {
+        compatible = "mosyu,pca-led";
+
+        /* P04 接 LED，低电平点亮，GPIO 子系统会自动处理极性 */
+        led-gpios = <&pca9555 4 GPIO_ACTIVE_LOW>;
+    };
+};

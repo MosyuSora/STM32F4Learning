@@ -1,0 +1,18 @@
+#!/bin/sh
+case "$1" in
+    start)
+        echo -ne '\033[?25l' > /dev/tty0
+        /usr/bin/lcd_test &
+        ;;
+    stop)
+        killall lcd_test 2>/dev/null
+        ;;
+    restart)
+        $0 stop
+        sleep 1
+        $0 start
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+esac
