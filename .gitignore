@@ -14,3 +14,15 @@
 *.bin
 *.hex
 *.map
+
+# Windows NTFS 备用数据流标记
+*Zone.Identifier
+
+# lcd_test 下误丢的个人/无关文件
+reference/linux_proj/workspace/lcd_test/Boarding*
+reference/linux_proj/workspace/lcd_test/Cluely*
+reference/linux_proj/workspace/lcd_test/whisper-*
+reference/linux_proj/workspace/lcd_test/m0nesy.zip
+
+# 超过 GitHub 100MB 单文件上限的大型资料
+reference/linux_proj/workspace/driver_examples/IMX6ULL/source/10_PCI_PCIe/rk3399_linux_release_*.tar.bz2
