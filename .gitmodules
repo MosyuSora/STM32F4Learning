@@ -1,0 +1,9 @@
+[submodule "reference/rtos_src/FreeRTOS-Kernel"]
+	path = reference/rtos_src/FreeRTOS-Kernel
+	url = https://github.com/FreeRTOS/FreeRTOS-Kernel.git
+[submodule "reference/rtos_src/rt-thread"]
+	path = reference/rtos_src/rt-thread
+	url = https://github.com/RT-Thread/rt-thread.git
+[submodule "reference/rtos_src/zephyr"]
+	path = reference/rtos_src/zephyr
+	url = https://github.com/zephyrproject-rtos/zephyr.git
