@@ -1,6 +1,24 @@
-# Reference - STM32F407 官方资料库
+# Reference - DISO Embedded System 资料库
 
-本目录存放野火官方提供的原始学习资料。代码文件夹编号（如 `11`, `12`, `21`）对应教程中的 **“篇-章”** 逻辑。
+本目录存放本教程使用的参考资料：前半部分以野火 STM32F407 官方资料和例程为主，RTOS 部分补充 FreeRTOS、RT-Thread、Zephyr 源码，后续 Linux 驱动部分也会继续在这里放置可追溯的阅读材料。
+
+野火官方代码文件夹编号（如 `11`, `12`, `21`）对应教程中的 **“篇-章”** 逻辑。
+
+## RTOS 源码索引
+
+`rtos_src/` 目录存放 Chapter6 之后用于源码研读和横向对比的 RTOS 源码。三套源码均以 Git submodule 固定到 release tag，作为阅读材料使用，不初始化它们各自的额外子模块。
+
+| RTOS | 版本 | 固定 commit | 路径 | 核心阅读文件 | 本教程用途 |
+|------|------|-------------|------|--------------|------------|
+| FreeRTOS Kernel | `V11.3.0` | `9b777ae5c5b8e9e456065a00294d1e5f5f9facf5` | [`rtos_src/FreeRTOS-Kernel/`](./rtos_src/FreeRTOS-Kernel/) | `tasks.c`, `list.c`, `portable/GCC/ARM_CM4F/port.c` | Chapter6-8 主线源码，对照 TCB、ready list、PendSV 和 SysTick |
+| RT-Thread | `v5.2.2` | `ddf52e2cdd977f14fc04035c88672ac204aec713` | [`rtos_src/rt-thread/`](./rtos_src/rt-thread/) | `src/thread.c`, `src/scheduler_up.c`, `src/clock.c`, `src/object.c` | 横向对照 C 语言对象模型、线程创建和调度器组织方式 |
+| Zephyr | `v4.4.1` | `1f6485eca25431b5ff27ce9a754218c9e559bbbb` | [`rtos_src/zephyr/`](./rtos_src/zephyr/) | `kernel/thread.c`, `kernel/sched.c`, `kernel/timeslicing.c`, `kernel/timeout.c` | 横向对照现代 RTOS 的 Kconfig、设备模型和内核复杂度 |
+
+建议阅读顺序：
+
+1. 先读 FreeRTOS 的 `tasks.c` 和 `portable/GCC/ARM_CM4F/port.c`，配合 Chapter6 的手搓代码理解任务栈、TCB 和 PendSV。
+2. 再读 RT-Thread 的 `src/thread.c` 和 `src/object.c`，观察 Chapter5 的 C 语言对象模型如何进入 RTOS 内核。
+3. 最后浏览 Zephyr 的 `kernel/thread.c`、`kernel/sched.c` 和 `kernel/timeslicing.c`，理解更完整的工程体系会把同样的调度问题扩展到多架构、多配置和设备模型中。
 
 ## 📑 教程与源码对照索引 (54 Chapters Complete Index)
 
