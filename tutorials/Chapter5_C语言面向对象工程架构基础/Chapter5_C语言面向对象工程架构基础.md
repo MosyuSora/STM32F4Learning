@@ -45,7 +45,7 @@ void blue_led_on(void)  { GPIOF->BSRR = GPIO_Pin_8; }
 
 更大的问题在后面。当你写到 10 盏灯、20 盏灯，代码量线性膨胀。更要命的是，如果某天硬件改版，红灯从 Pin6 换到 Pin9，你得通篇搜索替换——**换一个 pin，改 N 个地方。** 这在工程上叫"脆弱的系统"——改一处崩一片。
 
-更深处的问题是：Ch6-8 你要手搓 FreeRTOS，FreeRTOS 支持同时运行几十个任务。每个任务有自己的栈、优先级、状态。你打算怎么写？
+更深处的问题是：Ch6-7 你要手撕 FreeRTOS 底层机制，并把它放回 STM32 工程实践里。FreeRTOS 支持同时运行几十个任务。每个任务有自己的栈、优先级、状态和通信关系。你打算怎么写？
 
 ```c
 void task1_resume(void) { ... }
@@ -73,15 +73,14 @@ flowchart LR
         ch5["Ch5 C语言OOP<br/>从裸过程式到工程化"]
     end
 
-    subgraph 后三章
-        ch6["Ch6 FreeRTOS<br/>内核基石"]
-        ch7["Ch7 FreeRTOS<br/>进程模型"]
-        ch8["Ch8 FreeRTOS<br/>进程同步"]
+    subgraph 后两章
+        ch6["Ch6 FreeRTOS<br/>底层核心机制"]
+        ch7["Ch7 FreeRTOS<br/>工程实践"]
     end
 
     ch1 --> ch2 --> ch3 --> ch4
     ch4 --> ch5
-    ch5 --> ch6 --> ch7 --> ch8
+    ch5 --> ch6 --> ch7
 
     style ch5 fill:#FFD700,stroke:#333,stroke-width:3px
 ```
