@@ -26,7 +26,7 @@ Part III Linux Driver Fast Track
 | 部分 | 主题 | 当前状态 |
 |------|------|----------|
 | Part I | STM32 裸机与外设基础 | Chapter 1-4 已成型 |
-| Part II | C 工程化与手搓 FreeRTOS | Chapter 5-8 推进中 |
+| Part II | C 工程化与 FreeRTOS | Chapter 5-7 推进中 |
 | Part III | Linux 驱动开发速通 | 规划中 |
 
 > 旧仓库名如果还是 `STM32F4Learning`，建议 GitHub 上改成 `DISO_EmbeddedSystem`。原来的名字适合起步阶段，现在已经装不下后面的路线了。
@@ -44,9 +44,8 @@ flowchart LR
 
     subgraph part2["Part II: RTOS Kernel From Scratch"]
         ch5["Ch5 C 语言工程化 / OOP in C"]
-        ch6["Ch6 任务栈 / TCB / PendSV / SysTick"]
-        ch7["Ch7 delay / 阻塞态 / 时间管理"]
-        ch8["Ch8 信号量 / 队列 / 同步原语"]
+        ch6["Ch6 手撕 FreeRTOS<br/>底层核心机制"]
+        ch7["Ch7 FreeRTOS 工程实践<br/>任务建模 / 移植"]
     end
 
     subgraph part3["Part III: Linux Driver Fast Track"]
@@ -57,8 +56,8 @@ flowchart LR
     end
 
     ch1 --> ch2 --> ch3 --> ch4
-    ch4 --> ch5 --> ch6 --> ch7 --> ch8
-    ch8 --> l1 --> l2 --> l3 --> l4
+    ch4 --> ch5 --> ch6 --> ch7
+    ch7 --> l1 --> l2 --> l3 --> l4
 ```
 
 ## 目录结构
@@ -76,9 +75,8 @@ flowchart LR
 │   ├── Chapter3_外设串讲_通信协议和ADC/
 │   ├── Chapter4_玩转总线_DMA和FSMC/
 │   ├── Chapter5_C语言面向对象工程架构基础/
-│   ├── Chapter6_手搓FreeRTOS_内核基石与静态任务管理/
-│   ├── Chapter7_手搓FreeRTOS_进程模型与定时/
-│   └── Chapter8_手搓FreeRTOS_进程同步和信号量/
+│   ├── Chapter6_手撕FreeRTOS_底层核心机制/
+│   └── Chapter7_FreeRTOS工程实践_任务建模与移植/
 │
 └── README.md
 ```
@@ -99,9 +97,8 @@ flowchart LR
 | 章节 | 标题 | 状态 |
 |:---:|------|:---:|
 | 5 | [C 语言面向对象工程架构基础](tutorials/Chapter5_C语言面向对象工程架构基础/Chapter5_C语言面向对象工程架构基础.md) | 编写中 |
-| 6 | [手搓 FreeRTOS：内核基石与静态任务管理](tutorials/Chapter6_手搓FreeRTOS_内核基石与静态任务管理/Chapter6_手搓FreeRTOS_内核基石与静态任务管理.md) | 编写中 |
-| 7 | [手搓 FreeRTOS：进程模型与定时](tutorials/Chapter7_手搓FreeRTOS_进程模型与定时/Chapter7_手搓FreeRTOS_进程模型与定时.md) | 规划中 |
-| 8 | [手搓 FreeRTOS：进程同步和信号量](tutorials/Chapter8_手搓FreeRTOS_进程同步和信号量/Chapter8_手搓FreeRTOS_进程同步和信号量.md) | 规划中 |
+| 6 | [手撕 FreeRTOS：底层核心机制](tutorials/Chapter6_手撕FreeRTOS_底层核心机制/Chapter6_手撕FreeRTOS_底层核心机制.md) | 重写中 |
+| 7 | [FreeRTOS 工程实践：任务建模与移植](tutorials/Chapter7_FreeRTOS工程实践_任务建模与移植/Chapter7_FreeRTOS工程实践_任务建模与移植.md) | 规划中 |
 
 ### Part III: Linux Driver Fast Track
 
@@ -109,10 +106,10 @@ flowchart LR
 
 | 章节 | 主题 | 目标 |
 |:---:|------|------|
-| 9 | Linux 内核模块与字符设备 | 从 `hello.ko` 到 `file_operations`，接上 Chapter5 的 ops/vtable |
-| 10 | platform driver 与 device tree | 理解 Linux 如何描述硬件，以及驱动如何匹配设备 |
-| 11 | GPIO / IRQ / timer / workqueue | 把 STM32 裸机里的 GPIO、中断、定时器迁移到 Linux 驱动模型 |
-| 12 | I2C / SPI / input / misc 驱动 | 写几个最常见的真实设备驱动骨架 |
+| 8 | Linux 内核模块与字符设备 | 从 `hello.ko` 到 `file_operations`，接上 Chapter5 的 ops/vtable |
+| 9 | platform driver 与 device tree | 理解 Linux 如何描述硬件，以及驱动如何匹配设备 |
+| 10 | GPIO / IRQ / timer / workqueue | 把 STM32 裸机里的 GPIO、中断、定时器迁移到 Linux 驱动模型 |
+| 11 | I2C / SPI / input / misc 驱动 | 写几个最常见的真实设备驱动骨架 |
 
 Part III 的主线不是“背 Linux API”，而是把前两部分的知识翻译过去：
 
@@ -132,7 +129,7 @@ Part III 的主线不是“背 Linux API”，而是把前两部分的知识翻�
 
 - 野火 STM32F407 教程 PDF 与官方例程
 - Chapter5 相关的 C 语言工程化参考资料
-- Chapter6 之后用于源码研读的 RTOS 源码：
+- Chapter6/7 用于源码研读和工程对照的 RTOS 源码：
   - FreeRTOS Kernel `V11.3.0`
   - RT-Thread `v5.2.2`
   - Zephyr `v4.4.1`
@@ -151,4 +148,3 @@ Part III 的主线不是“背 Linux API”，而是把前两部分的知识翻�
 如果说普通开发板教程解决的是“这个外设怎么用”，那这个仓库更想回答的是：
 
 > 为什么嵌入式系统会长成今天这样？
-
