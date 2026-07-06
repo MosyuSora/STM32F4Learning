@@ -775,3 +775,68 @@ COMM send 12 -> count=2
 - **被叫醒 ≠ 已处理。** COMM 被叫回候场，也只是"有资格上台"，真处理那笔数据，还得等派活和换班（§5、§6 的老规矩，又一次）。
 
 数据这条线走通了，可四个人还共用着**同一支笔**——那唯一一路 UART。LOG 正低头写着长长的流水账，COMM 突然有急事也要用它，**这支笔到底归谁、会不会俩人抢着打架？** 下一节的互斥锁，管的就是这个。
+
+## 9 互斥锁：一支笔，一把钥匙
+
+传送带解决了"数据怎么交"，可有些东西天生**只能一个人用**：那一支 UART 笔、那条 SPI 总线、那块正在擦写的 Flash。LOG 写日志要用笔，COMM 发响应也要用笔——**两人同时下笔，写出来的字就叠成一团谁也认不得**。这类"同一时刻只容一个人"的资源，得有个规矩管着。
+
+### 9.1 给笔配一把唯一的钥匙
+
+规矩很朴素：**给这支笔配一把、且只配一把钥匙**。想用笔，先来领钥匙；用完，把钥匙还回去。领着钥匙的那位，叫 **owner（当前持有者）**；想用却没领到的，只能在门外排队等钥匙还回来，叫 **waiter（等待者）**。这把钥匙，就是**互斥锁 mutex**。
+
+注意它和传送带（队列）的分工不一样：队列关心"**东西**从谁传到谁"，钥匙关心"这件**独占资源**眼下归谁"。所以读 mutex，眼睛别盯数据，盯两样：**钥匙在谁手里（owner）、谁在门外等（waiter）**。
+
+### 9.2 优先级反转：一个不相干的人，拖垮了急件
+
+钥匙的规矩听着天经地义，可它会捅出一个特别阴、又特别经典的娄子。看这么一幕（三个人：LOG 低优先级、COMM 高优先级，中间还杵着个跟笔毫不相干的中优先级活，就叫它 MID）：
+
+1. LOG 领了钥匙，正低头写它那长长的流水账；
+2. COMM 来了急件，也要用笔——可钥匙在 LOG 手里，**COMM 只能等**。到这儿都还合理，急件等一下持有者，认了；
+3. 坏就坏在这时候：**MID 醒了**。它根本不用笔，但它比 LOG 急，**一上来就把 LOG 从工作台上挤了下去**，自顾自干它的活。
+
+结果呢？LOG 被 MID 压着、迟迟写不完、**还不了钥匙**；COMM 在门外**跟着一起干等**。绕了一圈，一个跟笔八竿子打不着、优先级还没 COMM 高的 MID，硬生生把最急的 COMM 拖住了。这就是臭名昭著的**优先级反转**——
+
+> **优先级反转：高优先级任务，被一个跟锁毫不相干的中优先级任务，间接拖慢了。** 根子在于：占着钥匙的是个低优先级的人，他一被中优先级插队，那把钥匙就迟迟还不回来。
+
+工头的补救，叫**优先级继承**：**当 COMM 来等 LOG 手里的钥匙时，工头临时把 LOG 提到和 COMM 一样急。** 这么一来 MID 就再也挤不动 LOG 了，LOG 得以尽快写完、把钥匙还掉；LOG 一还钥匙，**立刻被恢复成原来的低优先级**。
+
+> 继承**不是**让 COMM 绕过钥匙抢笔——资源边界一直都在。它只是**给那个占着钥匙的低优先级的人临时"提级"，催他赶紧用完归还**，别被不相干的人插队拖死。
+
+### 9.3 demo：owner 被临时"提级"，还锁后复原
+
+[`v10_mutex_inheritance`](code/v10_mutex_inheritance/demo.c) 把这条链原样跑了一遍，顺着 owner 读最顺：
+
+```output
+LOW_LOG takes mutex
+MID_WORK is ready and could preempt LOW_LOG if no inheritance exists
+HIGH_COMM waits for mutex owned by LOW_LOG
+inherit: LOW_LOG priority 1 -> 3
+LOW_LOG releases mutex, priority restores 3 -> 1
+```
+
+一行行对着看：LOW_LOG 领钥匙成为 owner；MID_WORK 醒了、**本可以把 LOW 挤下去**（`could preempt ... if no inheritance`——这行就是反转的隐患）；HIGH_COMM 来等钥匙，触发 `inherit`，把 LOW 从 1 临时提到 3——**MID（2）这下压不动 LOW 了**；LOW 用完 `releases`，优先级从 3 复原回 1。
+
+![优先级反转与继承的全过程](img/fig-015.png)
+
+最该盯的证据是 `HIGH_COMM waits for mutex owned by LOW_LOG`：**COMM 优先级最高，却照样越不过还没还钥匙的 LOG**——资源所有权，比优先级更硬。
+
+### 9.4 回到源码：锁为什么住在 queue.c
+
+第一次翻源码会有点错愕：**mutex 的代码，居然在 `queue.c` 里。** 别别扭——FreeRTOS 干脆复用了整套队列机制来实现锁和信号量（一把锁，就当成一个"容量为 1、里头装的不是数据而是所有权"的特殊队列）。只要抓住 owner 和等待链，文件名带不偏你：
+
+| 环节 | 源码入口 | 干的活 |
+| --- | --- | --- |
+| 造一把钥匙 | [`xQueueCreateMutex()`](../../reference/rtos_src/FreeRTOS-Kernel/queue.c:647) | 沿队列路径创建 mutex（[`prvInitialiseMutex`](../../reference/rtos_src/FreeRTOS-Kernel/queue.c:617) 初始化 owner 字段） |
+| 领钥匙（可能没领到） | [`xQueueSemaphoreTake()`](../../reference/rtos_src/FreeRTOS-Kernel/queue.c:1659) | 有 owner 时，把自己挂进等待链 |
+| 临时提级 | [`xTaskPriorityInherit()`](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c:6650) | 把 owner 提到等待者的优先级 |
+| 还钥匙后复原 | [`xTaskPriorityDisinherit()`](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c:6753) | owner 释放锁后恢复原优先级 |
+
+![优先级继承链](img/fig-036-mutex-priority-inheritance-chain.png)
+
+排查上手就一句话：**高优先级任务卡住，先找 owner——谁持着锁、持了多久、锁里到底在干什么。** 把 owner、waiter、领锁 tick、还锁 tick、临时优先级这几样一起采，比一句"锁导致卡顿"精准得多。
+
+最后是最要命、也最容易被误解的一条工程判断：
+
+> **继承是止血，不是根治。** 它能省下"被中优先级插队"的那段时间，却**变不快慢串口本身，也替你缩不短持锁区**。真正该优化的，永远是**持锁区的大小**——别在握着钥匙时去干慢串口、擦 Flash、大段格式化。钥匙攥得越久，全班组等得越久。
+
+到这儿，任务怎么跑、怎么等、怎么交接、怎么抢资源，都讲遍了。可我们一路都在用 `xTaskCreate`、`xQueueCreate`、`xSemaphoreCreateMutex` 凭空"变"出这些对象——**它们到底从哪块地长出来的？** 任务栈、队列缓冲、锁，桩桩都要占 RAM。下一节的 heap_4，就是管这块地的**地主**。
