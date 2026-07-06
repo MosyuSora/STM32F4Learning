@@ -1,0 +1,64 @@
+# FreeRTOS symbols allowed to appear in Chapter 6 without triggering a
+# "verify vs source" warning. One per line. Grow this as sections are written;
+# every symbol here must be a real FreeRTOS kernel symbol or a demo symbol.
+# The human gate still spot-checks that each 对账 claim is semantically correct.
+
+# --- task / TCB ---
+TCB_t
+pxCurrentTCB
+xTaskCreate
+xTaskCreateStatic
+prvInitialiseNewTask
+prvAddNewTaskToReadyList
+pxTopOfStack
+pxStack
+uxPriority
+xStateListItem
+xEventListItem
+
+# --- port / stack / context switch ---
+pxPortInitialiseStack
+vPortSVCHandler
+xPortPendSVHandler
+vPortStartFirstTask
+xPortStartScheduler
+
+# --- lists ---
+List_t
+ListItem_t
+MiniListItem_t
+vListInitialise
+vListInsert
+vListInsertEnd
+uxListRemove
+listGET_OWNER_OF_NEXT_ENTRY
+listGET_OWNER_OF_HEAD_ENTRY
+
+# --- scheduler / tick / delay ---
+vTaskStartScheduler
+vTaskSwitchContext
+vTaskDelay
+vTaskDelayUntil
+xTaskIncrementTick
+xTaskResumeAll
+prvAddCurrentTaskToDelayedList
+
+# --- queue / semaphore / mutex ---
+Queue_t
+xQueueCreate
+xQueueGenericSend
+xQueueReceive
+prvCopyDataToQueue
+prvCopyDataFromQueue
+xTaskPriorityInherit
+xTaskPriorityDisinherit
+pxMutexHolder
+
+# --- heap_4 ---
+pvPortMalloc
+vPortFree
+prvHeapInit
+prvInsertBlockIntoFreeList
+xFreeBytesRemaining
+xMinimumEverFreeBytesRemaining
+BlockLink_t
