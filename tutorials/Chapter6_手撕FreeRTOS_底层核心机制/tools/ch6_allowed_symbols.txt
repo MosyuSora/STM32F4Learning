@@ -34,6 +34,10 @@ vListInsertEnd
 uxListRemove
 listGET_OWNER_OF_NEXT_ENTRY
 listGET_OWNER_OF_HEAD_ENTRY
+pxNext
+pxPrevious
+pxContainer
+uxNumberOfItems
 
 # --- scheduler / tick / delay ---
 vTaskStartScheduler
