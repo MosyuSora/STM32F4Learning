@@ -1,0 +1,7 @@
+tick=0 LED: ready -> delayed until tick 3
+tick=1 sys tick
+tick=2 sys tick
+tick=3 sys tick
+tick=3 LED: delayed -> ready, not necessarily running yet
+tick=4 sys tick
+

@@ -1,0 +1,4 @@
+TCB name=LED     priority=2 top_of_stack=<addr> list_owner=LED
+TCB name=LOG     priority=1 top_of_stack=<addr> list_owner=LOG
+TCB is the scheduler handle: identity + stack + priority + list hook
+

@@ -1,9 +1,12 @@
 # Chapter6 code
 
-本目录按 Chapter6 的手撕路线组织。当前先建立版本骨架，后续每个版本只服务一个核心机制，避免把 FreeRTOS 写成一坨“迷你全家桶”。
+本目录按 Chapter6 的手撕路线组织。每个版本只服务一个核心机制，避免把 FreeRTOS 写成一坨“迷你全家桶”。能在 PC 上编译运行的 demo 使用标准 C；启动第一个任务和 PendSV 这类硬件相关主题使用明确标注的教学模型。
+
+当前环境如果没有 C 编译器，运行脚本会显示 `expected-output.txt`，不会伪装成本机已经编译执行。
 
 | 版本 | 主题 | 对照源码 |
 |------|------|----------|
+| `v0_bare_loop` | 裸机主循环被慢工作拖住 | Chapter6 `## 1` |
 | `v1_task_stack` | 任务入口和独立栈 | `port.c:pxPortInitialiseStack()` |
 | `v2_tcb` | 最小 TCB | `tasks.c:TCB_t` |
 | `v3_kernel_list` | 内核链表 | `list.c`, `include/list.h` |
@@ -16,4 +19,10 @@
 | `v10_mutex_inheritance` | mutex 和优先级继承 | `queue.c` mutex 路径 |
 | `v11_heap4_allocator` | 简化 heap_4 allocator | `portable/MemMang/heap_4.c` |
 
-代码验收标准：概念路径对得上 FreeRTOS 源码；能跑不是必要条件。
+运行单个版本：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\v1_task_stack\run.ps1
+```
+
+代码验收标准：概念路径对得上 FreeRTOS 源码；能跑的 demo 要有输出，不能真实运行的模型要清楚标注边界。
