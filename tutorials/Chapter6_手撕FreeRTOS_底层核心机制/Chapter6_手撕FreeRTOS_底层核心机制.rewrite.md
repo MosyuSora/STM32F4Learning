@@ -1,5 +1,5 @@
 
-# Chapter 6 手撕 FreeRTOS：从一个人单干，到请个工头带班
+# Chapter 6 手撕 FreeRTOS：车间工头速成指南
 
 > 本文件是第六章的可读性重写稿，逐节写入、逐节验收，定稿后替换正式章节。
 > 主线比喻：四个脾气迥异的"人"（LED / SENSOR / COMM / LOG）共用一张工作台（CPU）。
@@ -507,3 +507,120 @@ tick=4 switch_to=COMM priority=3
 这条分界直接决定排查怎么走。COMM 明明很急却响应慢，别笼统骂调度，分三层看：**它是否真在候场区**（不在就去查队列/事件，见 §7、§8）→ **`pxCurrentTCB` 是否已指向它**（没指向就是选择或调度挂起的问题）→ **指向了却还没跑起来**（那就是 PendSV、栈现场或中断屏蔽的问题，见 §6）。三层一分，就不会在 `tasks.c`、`queue.c`、`port.c` 之间瞎跳。
 
 工头已经点了名，可被点到的人还稳稳待在候场区没动——**从"点名"到"真站上台"，那惊险的一跳是怎么完成的**？这就是下一节 PendSV 的主场。
+
+## 6 启动与 PendSV：从"点名"到"真站上台"
+
+上一节结尾卡在一个悬念上：工头点了名（`pxCurrentTCB` 改指向 LOG 了），可 CPU 此刻还在 LED 的现场里跑——寄存器、栈指针、执行位置，全是 LED 的。**点名只是定了"下一个该谁"，真把人换上台，是另一码事。**
+
+这"换上台"其实分两种场合，难度差得远，得拆开讲：
+
+- **开工第一铃**：整台机器刚上电，工头第一次派人上台。这时候台上**还没有旧人要下台**，只需把准备好的第一个人扶上去，最简单。
+- **中途换班**：机器已经跑起来，要把台上这位换成另一位。这就得先把**旧人干到一半的现场收好**，再把**新人上次的现场摆回去**——这才是上下文切换的硬核，也是这一节的重头。
+
+先讲简单的开工铃，再啃换班。
+
+### 6.1 开工第一铃：main 把工作台交出去
+
+裸机里，`main()` 像舞台正中那个人，从头到尾攥着执行节奏：初始化完就进 `while(1)`，所有活都在这条线上排队。RTOS 里，`main()` 的角色变了——它只负责**把台子搭好**（建任务、建队列、备资源），然后按下开工铃 `vTaskStartScheduler()`，**把工作台交给工头，自己退到幕后**。这一交，就再也不回到那个裸机主循环了。
+
+第一次上台之所以简单，是因为**没有旧人要下台**，不必保存谁的现场，只要把创建时给第一个人摆好的那套"开工现场"（§1 里 `pxPortInitialiseStack` 预摆的初始栈帧）倒回 CPU 就行。这活由一条叫 SVC 的异常来干。[`v6_start_first_task`](code/v6_start_first_task/demo.c) 把这一交权拍成了四行：
+
+```output
+main: create tasks and start scheduler
+SVC model: restore the prepared first task context
+first task=COMM priority=3
+main stops owning CPU; task context owns execution
+```
+
+最要紧的是最后一句 **`main stops owning CPU`**——不是说 `main()` 消失了，而是**系统的执行权已经从 main 主循环，转交给了任务世界**。此后再靠任务的等待、唤醒、调度往前推，而不是靠 main 那根 `while(1)`。真实内核里这一段是这么接力的：
+
+| 环节 | 源码入口 | 干的活 |
+| --- | --- | --- |
+| 按开工铃 | [`vTaskStartScheduler()`](reference/rtos_src/FreeRTOS-Kernel/tasks.c:3700) | 建好 idle 任务、启动内核，转入端口层 |
+| 配硬件 | [`xPortStartScheduler()`](reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:305) | 配好 SysTick、PendSV 等异常优先级 |
+| 扶第一个人上台 | [`prvPortStartFirstTask()`](reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:278) → [`vPortSVCHandler()`](reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:260) | 从 `pxCurrentTCB` 取第一个任务的栈顶，把现场倒回 CPU |
+
+![main 把控制权交给第一个任务](img/fig-006.png)
+
+### 6.2 中途换班：上下文切换到底在"切"什么
+
+开工之后，真正天天发生、也最容易讲晕的，是**换班**。先说清楚换的是什么。
+
+台上那位干活时，CPU 手边那一小把**寄存器**（§1 说的"随身口袋"）里，装着他此刻算到哪、下一条指令在哪、局部变量是几。这一把口袋的内容，就是他的**现场**。要把他换下去、又保证他将来能回来接着干，就必须**把他口袋里的东西原样收进他自己的柜子**；等他下次上台，再从柜子里把这套现场倒回口袋。
+
+这个"柜子"，就是每个任务自己的**栈**；而 **PSP（Process Stack Pointer）就是这个人自己柜子的钥匙**——一个专属的栈指针，指向他现场存放的位置。§2 讲过，TCB 的第一个字段 `pxTopOfStack` 存的正是这把钥匙。于是换班的骨架就三步，[`v7_pendsv_switch`](code/v7_pendsv_switch/demo.c) 把它拍得干干净净：
+
+```output
+model: scheduler already selected LOG
+PendSV: save PSP=0x20001000 into LED TCB
+PendSV: pxCurrentTCB LED -> LOG
+PendSV: restore PSP=0x20002000 from LOG TCB
+```
+
+> 换班三步：**① 把台上 LED 的现场（PSP）锁进 LED 的柜子**（存旧人）→ **② 当前任务牌翻到 LOG**（`pxCurrentTCB` 改指向）→ **③ 从 LOG 的柜子取出他上次的现场，倒回 CPU**（恢复新人）。干这套交接的异常，就叫 **PendSV**。
+
+为什么专门派 PendSV 这么个"交接员"，而不在时钟中断里顺手就切了？因为想换班的场合很多（时钟到点、高优先级被唤醒、当前任务主动阻塞），要是各处随手切，时机乱、还容易在中断里踩坑。把真正的切换**统一收口到 PendSV**，并让它在最低异常优先级上排队执行，时机就集中、可控了。于是分工清清楚楚：
+
+![SysTick、调度器、PendSV 各干一段](img/fig-013.png)
+
+**SysTick（或其他事件）负责"发现该换人了"，调度器负责"点名选谁"，PendSV 才负责"真把班换了"。** 三段分开，后面排查 HardFault 时才不会一股脑赖到 PendSV 头上。
+
+### 6.3 为什么 PendSV 只手动存一半寄存器
+
+这是 PendSV 汇编最唬人、也最关键的一个点，值得慢慢来。很多人第一次读 `xPortPendSVHandler` 都会卡在同一个问题上：**代码里只看见手动保存 `r4-r11`，那 `r0-r3`、`pc`、`xPSR` 这些去哪了？**
+
+答案是：**换班的交接单，一半是"系统自动打印"的，另一半才要交接员手写补上。**
+
+Cortex-M 有个规矩——**只要进异常，硬件会自动把一批寄存器压进当前的栈**：`r0-r3`、`r12`、`lr`、`pc`、`xPSR`。这批正是异常返回时硬件要自己用来"复位现场"的，所以它包办了。PendSV 一进来，这半张交接单已经自动打印好了，不用管。
+
+可硬件只管这半张。另一半 `r4-r11`，按调用约定属于"谁用谁负责保住"的寄存器，硬件进异常时**不会**帮你存。偏偏任务回来后还指着它们里头的局部计算——**这半张，就得 PendSV 亲手补写**，压进这个人自己的柜子（PSP 指向的栈）。一张表看清这条分界：
+
+| 现场 | 谁来存 | 说明 |
+| --- | --- | --- |
+| `r0-r3`、`r12`、`lr`、`pc`、`xPSR` | **硬件自动**（进异常时压栈） | 异常返回时硬件自己要用，不劳 PendSV 操心 |
+| `r4-r11` | **PendSV 手动**（`stmdb`/`ldmia`） | 硬件不管，但任务回来要用，必须亲手补存补取 |
+| `PSP` | PendSV 读出/写回 | 每个人柜子的钥匙；存进/取自 TCB 的 `pxTopOfStack` |
+| `EXC_RETURN`（在 `r14`） | PendSV 连同 `r4-r11` 一起存 | 它不是普通返回地址，而是告诉 CPU"异常返回后用 PSP、回线程模式、带不带 FPU 现场" |
+| `pxCurrentTCB` | 中间由 `vTaskSwitchContext` 更新 | 调度点名的结果，PendSV 照它决定"取哪个柜子" |
+| `BASEPRI` | 更新 TCB 前后临时抬高/清零 | 改当前任务、就绪表这些共享账目时，别被内核级中断插队 |
+
+![main、SVC、PSP、PendSV 关系总览](img/fig-020-svc-pendsv-psp.png)
+
+一句话收束：**FreeRTOS 的 PendSV 不是"保存全部寄存器"，而是补齐硬件没自动存的那另一半现场。** 想通这条，再看那几行 `stmdb`/`ldmia` 就不神秘了。
+
+### 6.4 回到 port.c：一条很规整的搬运线
+
+把 [`xPortPendSVHandler()`](reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:504) 的汇编压成 C 风格骨架，它就是一条规整的搬运线：
+
+```c
+old_psp = read_psp();                              /* 拿到旧人柜子的钥匙 */
+save_r4_to_r11_and_exc_return(old_psp);            /* 手动补存另一半现场 */
+pxCurrentTCB->pxTopOfStack = old_psp;              /* 钥匙锁进旧人的柜子(TCB) */
+
+raise_basepri();  vTaskSwitchContext();  clear_basepri();  /* 点名：只改牌，不搬现场 */
+
+new_psp = pxCurrentTCB->pxTopOfStack;              /* 取新人柜子的钥匙 */
+restore_r4_to_r11_and_exc_return(new_psp);         /* 手动取回另一半现场 */
+write_psp(new_psp);
+return_via_exc_return();   /* bx r14：异常返回，硬件自动弹回那半张交接单 */
+```
+
+盯住**两次方向反转**就抓住全部了：前半段方向是 `CPU → PSP → 旧 TCB`（把旧人现场收进柜子），后半段方向是 `新 TCB → PSP → CPU`（把新人现场倒回台上）。夹在中间的 [`vTaskSwitchContext()`](reference/rtos_src/FreeRTOS-Kernel/tasks.c:5120) **只翻当前任务牌、不搬一个寄存器**——保存和恢复全在端口层。这也正是 §5 那句"**点名≠切过去**"落到汇编上的样子。
+
+最后那个 `bx r14` 也别当普通函数返回读。此刻 `r14` 里装的是 `EXC_RETURN`，它触发的是**异常返回**：CPU 按这个值回到线程模式、改用新人的 PSP、（若有）连 FPU 现场一起恢复，然后硬件自动把那半张自动交接单弹回寄存器——新人这才真正站上了台。
+
+### 6.5 排查：故障停在 PendSV，不一定是 PendSV 的错
+
+PendSV 是现场交接的最后一棒，所以它也最容易背黑锅。记住一句：**HardFault 停在 PendSV 附近，只说明"坏现场在这一步被暴露"，不等于"现场是 PendSV 弄坏的"。** 真凶常常更早——栈溢出、TCB 被越界写、错误的中断优先级、在不该调 API 的地方调了 API。
+
+所以每当"任务该跑却没跑/切完就崩"，把它拆成三段独立证据，别混：
+
+| 三段 | 看什么 | 常见错判 |
+| --- | --- | --- |
+| **唤醒了**（wake） | 队列 / Delay / mutex 释放，有没有把它送回候场区 | 以为"该 ready 了就会跑" |
+| **点名了**（selected） | `pxCurrentTCB` 是否真指向它、优先级证据 | 以为"选中了就等于在跑" |
+| **切过去了**（switched） | 旧 PSP、新 PSP 是否各在自己栈范围内，TCB 栈顶是否被覆盖 | 以为"崩在 PendSV 就是 PendSV 写错" |
+
+三段一分开，`COMM 响应慢`就不会被粗暴归成"调度有问题"或"PendSV 有问题"，而是顺着 wake → selected → switched 一步步缩小到具体那一棒。
+
+到这儿，一个任务从"是谁"到"在哪块区"、被"点名"、再"真站上台"的整条链就通了。可我们一直默认一件事没深究：**任务凭什么会主动让出工作台去"等"？** LED 说"我要等 50 ms"，这 50 ms 里 CPU 去干嘛了、时间又是谁在数？下一节就看 Delay 与 Tick。
