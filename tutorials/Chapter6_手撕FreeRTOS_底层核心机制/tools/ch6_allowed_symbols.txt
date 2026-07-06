@@ -61,6 +61,10 @@ prvCopyDataToQueue
 prvCopyDataFromQueue
 xTaskPriorityInherit
 xTaskPriorityDisinherit
+xQueueCreateMutex
+prvInitialiseMutex
+xQueueSemaphoreTake
+xSemaphoreCreateMutex
 pxMutexHolder
 
 # --- heap_4 ---
