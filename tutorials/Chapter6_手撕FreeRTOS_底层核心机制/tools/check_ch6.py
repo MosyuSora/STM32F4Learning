@@ -122,8 +122,10 @@ def check(text, lines, only_section=None, is_full=True):
             ln = text[: m.start()].count("\n") + 1
             fail(f"L{ln}: demo dir not found: code/{d}")
 
-    # 5b. reference/ source links must resolve (relative to chapter dir)
-    for m in re.finditer(r"\]\((\.\./\.\./reference/[^):\s]+)(?::\d+)?\)", text):
+    # 5b. reference/ source links must resolve (relative to chapter dir).
+    # portable form is ../../reference/...c#LNNN (GitHub jumps, all open);
+    # tolerate a legacy :NNN suffix too. strip the anchor before checking.
+    for m in re.finditer(r"\]\((\.\./\.\./reference/[^)\s:#]+)(?::\d+|#L\d+)?\)", text):
         rel = m.group(1)
         if not os.path.exists(os.path.join(CH_DIR, rel)):
             ln = text[: m.start()].count("\n") + 1
