@@ -122,6 +122,17 @@ def check(text, lines, only_section=None, is_full=True):
             ln = text[: m.start()].count("\n") + 1
             fail(f"L{ln}: demo dir not found: code/{d}")
 
+    # 5b. reference/ source links must resolve (relative to chapter dir)
+    for m in re.finditer(r"\]\((\.\./\.\./reference/[^):\s]+)(?::\d+)?\)", text):
+        rel = m.group(1)
+        if not os.path.exists(os.path.join(CH_DIR, rel)):
+            ln = text[: m.start()].count("\n") + 1
+            fail(f"L{ln}: reference link not found: {rel}")
+    # bare reference/... (missing ../../) is almost certainly a broken link
+    for m in re.finditer(r"\]\((reference/[^):\s]+)", text):
+        ln = text[: m.start()].count("\n") + 1
+        fail(f"L{ln}: reference link needs ../../ prefix: {m.group(1)}")
+
     # 6. advisory: FreeRTOS-looking symbols not on the allowlist
     allow = load_symbols()
     if allow:
