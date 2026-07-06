@@ -11,7 +11,9 @@ xTaskCreateStatic
 prvInitialiseNewTask
 prvAddNewTaskToReadyList
 pvParameters
+pxNewTCB
 pxTopOfStack
+TaskHandle_t
 pxStack
 uxPriority
 xStateListItem
