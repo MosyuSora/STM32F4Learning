@@ -380,4 +380,130 @@ list->uxNumberOfItems--;         /* 这块区人数 -1 */
 | ready list | 有资格却没运行 | 优先级、同级轮转、当前任务、PendSV |
 | 列表节点异常 | 状态混乱或崩溃 | TCB 完整性、越界写、栈水位 |
 
-位置清楚了，源码就不再是一堆函数名，而是一条移动路线：进入列表、离开列表、回到 ready、再等调度。可再往前倒一步会发现一个更基本的前提——**任务得先"成为对象"、并被放进某个列表位置，后面的调度和唤醒才谈得上**。下一节就看这一步：任务创建，到底把函数、栈和 TCB 组装成了什么。
+位置清楚了，源码就不再是一堆函数名，而是一条走位路线：进某块区、离开某块区、回到候场、再等派活。可再往前倒一步会冒出个更根上的问题——**这个"工人"当初是怎么被招进来、又怎么第一次站进候场区的**？下一节就看这一步：任务创建。
+
+## 4 任务创建：给新人办入职，不等于让他上台
+
+前三节，我们把一个"工人"拆成了三样东西：他的**工位**（栈，§1）、他那**页账**（TCB，§2）、他站的**区**（列表，§3）。这一节要做的，是把这三样东西**装到一起**，变成工头真能调度的一个人。干这件事的，就是 `xTaskCreateStatic()`——把它想成**给新人办入职**：备齐工位、建好账页、摆好开工第一天的现场，最后把名字往花名册的"候场区"里一记。
+
+这里有个新手几乎都会踩的误会，先用一句话钉死：
+
+> **办完入职，不等于已经上台干活。** `xTaskCreateStatic()` 返回成功，只说明这个人齐活了、进了候场区待命；他哪一刻真站上工作台，得等工头派活（调度）、甚至等开工铃响（启动调度器）。
+
+### 4.1 "创建成功"到底成了什么
+
+调用 `xTaskCreateStatic()` 时，表面看只是递进去入口函数、任务名、栈、参数、优先级五样东西。可内核在背后跑的是一条**装配线**：拿栈摆好开工现场（§1 那套寄存器口袋），把名字、优先级、栈顶填进账页（§2 的 TCB），最后把这页账挂进候场区（§3 的 ready 列表）。
+
+所以"创建成功"和"任务在跑"根本是两码事。**创建成功 = 装配完成、人在候场区**；至于他什么时候打印第一条日志，还得看三件事：调度器启没启动、优先级够不够高、他一上台会不会又立刻去等钟点或等料。把这条边界记牢，后面一大堆"任务怎么没起来"就能分出层次，而不是一股脑赖到"入口函数写错了"。
+
+### 4.2 demo：办完入职，人却还在候场区待命
+
+[`v4_static_task_create`](code/v4_static_task_create/demo.c) 专门把这个误会拆开。它给 LED、LOG 各办一次入职，然后你会发现——**代码从头到尾没调用过任何任务入口函数**：
+
+```c
+static MiniTCB *mini_xTaskCreateStatic(TaskEntry entry, const char *name, void *parameter,
+                                       unsigned priority, uint32_t *stack_base,
+                                       unsigned stack_words, MiniTCB *tcb, ReadyList *ready) {
+    tcb->name = name;
+    tcb->entry = entry;                          /* 账页：入口、参数、优先级 */
+    tcb->parameter = parameter;
+    tcb->priority = priority;
+    tcb->top_of_stack = &stack_base[stack_words - 1];   /* 栈顶：开工现场从这儿恢复 */
+    ready_insert(ready, tcb);                     /* 送进候场区，仅此而已 */
+    return tcb;
+}
+```
+
+```output
+created LED    priority=2 top=<addr> -> ready list
+created LOG    priority=1 top=<addr> -> ready list
+ready list after creation:
+  LOG is ready but not necessarily running
+  LED is ready but not necessarily running
+```
+
+重点在最后两行那句 **`ready but not necessarily running`**——人办好入职、进了候场区，但一个都还没上台。这正是这个 demo 最想让你记住的：**候场区里"有资格"，和工作台上"正在干"，中间还隔着工头派活和真正切过去两步**。
+
+放回项目里，这句话就是启动阶段的分界线：`xTaskCreateStatic()` 返回成功、任务入口却没打印第一条日志，**先别急着改入口函数**——先确认 TCB 和栈材料是不是长期有效、人是不是真进了候场区，再看调度器启没启动、是不是被更急的任务一直压着。
+
+### 4.3 回到 tasks.c：入职手续的三张单子
+
+真实的入职手续，就是三个函数接力，正好对上 demo 那三步：
+
+| 入职环节 | 源码入口 | 干的活 |
+| --- | --- | --- |
+| 收材料 | [`xTaskCreateStatic()`](reference/rtos_src/FreeRTOS-Kernel/tasks.c:1332) | 接住应用给的静态栈、TCB、入口、参数、优先级 |
+| 建账页 + 摆现场 | [`prvInitialiseNewTask()`](reference/rtos_src/FreeRTOS-Kernel/tasks.c:1816) | 填 TCB，并调 [`pxPortInitialiseStack()`](reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:202) 摆好开工现场 |
+| 进候场区 | [`prvAddNewTaskToReadyList()`](reference/rtos_src/FreeRTOS-Kernel/tasks.c:2052) | 把新人挂进 ready 列表——**这一步只给资格，不给工作台** |
+
+把它压成骨架，一眼就能看出"哪儿都没有真的让任务跑起来"：
+
+```c
+prvInitialiseNewTask(entry, name, priority, parameter, pxNewTCB);   /* 填账页 */
+pxNewTCB->pxTopOfStack = pxPortInitialiseStack(...);                /* 摆开工现场 */
+prvAddNewTaskToReadyList(pxNewTCB);                                 /* 送进候场区 */
+return (TaskHandle_t) pxNewTCB;                                     /* 交回一个句柄，人却还没上台 */
+```
+
+![任务创建的四步组装线](img/fig-012.png)
+
+这张图顺着看是入职流程，倒着看就是排查顺序：任务没跑，先确认它有没有被装成对象、有没有进候场区，**再**去怀疑调度和入口逻辑。静态创建还有个专属的坑——**材料的生命周期**：交给它的栈数组和 TCB 缓冲区必须长期活着，绝不能是某个函数里一返回就失效的局部变量，否则人还在候场区，工位和账页却已经被回收了。
+
+新人办完入职，就该轮到工头发话了：候场区里好几个人都想上，工作台只有一个——**派谁**？
+
+## 5 调度：候场区好几个人，工头派谁上台
+
+上一节，新人办完入职、进了候场区。可候场区常常不止站着一个人，而单核工作台一次只容得下一位。于是那个老问题终于摆到台面上：**工头到底凭什么挑谁上台？**
+
+规则其实很朴素：**谁急，谁先上**（优先级高的先）；**一样急的，轮流来**（同级轮转）。至于还在等钟点区、等料区的人，这轮压根不参与——他们又不是不想上，是还没到能上的时候。
+
+> **ready 是"有资格上台"，running 是"这一刻真被点名站上去了"。** 这俩之间，差的正是工头那一次点名。RTOS 里一大半"怎么没跑"的怪事，都卡在这两个词的缝里。
+
+### 5.1 谁急谁先上——优先级不是"谁重要"
+
+先破一个常见误解：**优先级不是"谁重要"的情绪排序，而是"谁更不能晚"的工程约束**。LOG 对定位故障当然重要，但它天生能后台慢慢消化，晚几十毫秒天塌不下来；COMM 要接外部的话，晚一下对方就当你掉线了。所以 COMM 该比 LOG 急，和"谁更有价值"没关系。设计优先级时，问的不是"这个功能重不重要"，而是"它晚 10 ms、50 ms、100 ms，各会捅出什么娄子"。
+
+### 5.2 demo：COMM 一急，就把 LED 挤下去
+
+[`v5_priority_scheduler`](code/v5_priority_scheduler/demo.c) 里的"工头"就一个动作——扫一遍候场区，挑出最急的那个。注意它挑人的两条规矩，顺序很关键：
+
+```c
+if (task->state != TASK_READY) continue;        /* ① 不在候场区的，直接跳过 */
+if (!best || task->priority > best_priority) {  /* ② 剩下的里挑最急的 */
+    best = task;
+    best_priority = task->priority;
+}
+```
+
+```output
+tick=0 switch_to=LED priority=2
+tick=1 switch_to=SENSOR priority=2
+tick=2 switch_to=LED priority=2
+event: COMM becomes ready
+tick=3 switch_to=COMM priority=3
+tick=4 switch_to=COMM priority=3
+```
+
+一个 tick 一个 tick 地读：开头 LED 和 SENSOR 一样急（都是 2），工头就让他俩**轮流上**（tick 0/1/2）；到 tick 3，COMM 来了急活、变进候场区，优先级 3 比谁都高，工头立刻改派 COMM。而 LOG 呢？它一直在候场区待着，可它太不急（优先级 1），**从头到尾没被点过一次名**——这不是 bug，是它本该让路。
+
+这就直接给了两条工程判断：**低优先级任务长期不上台，不一定是坏了**，可能只是更急的人一直占着台；反过来，**COMM 已经很急、却还是响应慢**，那就不能怪调度了，得往后看——是没被点名，还是点了名却没真正切过去。
+
+### 5.3 回到 tasks.c：工头点名，只改一个指针
+
+那"点名"在真实内核里是什么动作？说穿了，就是把一个叫 `pxCurrentTCB` 的指针，指向被挑中那个人的账页。三步接力：
+
+| 环节 | 源码入口 | 干的活 |
+| --- | --- | --- |
+| 一次派活从哪开始 | [`vTaskSwitchContext()`](reference/rtos_src/FreeRTOS-Kernel/tasks.c:5120) | 内核进入"挑当前任务"的入口 |
+| 挑最急的 | [`taskSELECT_HIGHEST_PRIORITY_TASK()`](reference/rtos_src/FreeRTOS-Kernel/tasks.c:236) | 从最高优先级的候场区里选出任务 |
+| 记下点名结果 | [`pxCurrentTCB`](reference/rtos_src/FreeRTOS-Kernel/tasks.c:463) | 当前任务指针指向被选中的 TCB |
+
+![优先级挑人与同级轮转](img/fig-003.png)
+
+而这里藏着整章最要命的一条分界，务必记死：
+
+> **点名（选中），不等于切过去（真站上台）。** `vTaskSwitchContext()` 只把 `pxCurrentTCB` 改成新人，真正保存旧人现场、把新人现场倒回 CPU，是下一节 PendSV 的活。
+
+这条分界直接决定排查怎么走。COMM 明明很急却响应慢，别笼统骂调度，分三层看：**它是否真在候场区**（不在就去查队列/事件，见 §7、§8）→ **`pxCurrentTCB` 是否已指向它**（没指向就是选择或调度挂起的问题）→ **指向了却还没跑起来**（那就是 PendSV、栈现场或中断屏蔽的问题，见 §6）。三层一分，就不会在 `tasks.c`、`queue.c`、`port.c` 之间瞎跳。
+
+工头已经点了名，可被点到的人还稳稳待在候场区没动——**从"点名"到"真站上台"，那惊险的一跳是怎么完成的**？这就是下一节 PendSV 的主场。
