@@ -65,7 +65,7 @@ def split_sections(lines):
     return out
 
 
-def check(text, lines, only_section=None):
+def check(text, lines, only_section=None, is_full=True):
     # 1. total budget
     if only_section is None and len(lines) > TOTAL_LINE_FAIL:
         fail(f"whole chapter {len(lines)} lines > cap {TOTAL_LINE_FAIL}")
@@ -109,8 +109,8 @@ def check(text, lines, only_section=None):
             fail(f"L{ln}: figure not found: img/{rel}")
         used_figs.add(os.path.basename(rel))
 
-    # unreferenced (kept) figures -> warn
-    if os.path.isdir(IMG_DIR) and only_section is None:
+    # unreferenced (kept) figures -> warn (only meaningful on the full canonical file)
+    if os.path.isdir(IMG_DIR) and only_section is None and is_full:
         for fn in sorted(os.listdir(IMG_DIR)):
             if fn.endswith(".png") and fn not in used_figs:
                 warn(f"figure never referenced: img/{fn}")
@@ -135,16 +135,17 @@ def check(text, lines, only_section=None):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--section", default=None, help="only check '## N ...'")
+    ap.add_argument("--file", default=MD, help="md file to check (default: canonical)")
     args = ap.parse_args()
 
-    if not os.path.exists(MD):
-        print(f"{RED}FAIL{RST} chapter md not found: {MD}")
+    if not os.path.exists(args.file):
+        print(f"{RED}FAIL{RST} chapter md not found: {args.file}")
         sys.exit(1)
-    with open(MD, encoding="utf-8") as f:
+    with open(args.file, encoding="utf-8") as f:
         text = f.read()
     lines = text.splitlines()
 
-    check(text, lines, args.section)
+    check(text, lines, args.section, is_full=(os.path.abspath(args.file) == os.path.abspath(MD)))
 
     scope = f"section {args.section}" if args.section else f"whole chapter ({len(lines)} lines)"
     print(f"== check_ch6: {scope} ==")
