@@ -20,6 +20,7 @@ xStateListItem
 xEventListItem
 
 # --- port / stack / context switch ---
+xPSR
 pxPortInitialiseStack
 vPortSVCHandler
 xPortPendSVHandler
