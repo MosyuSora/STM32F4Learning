@@ -18,6 +18,10 @@ pxStack
 uxPriority
 xStateListItem
 xEventListItem
+pcTaskName
+pxStack
+uxBasePriority
+listSET_LIST_ITEM_OWNER
 
 # --- port / stack / context switch ---
 xPSR
