@@ -179,7 +179,7 @@ CPU 干活时，手边有一小把**寄存器**，你可以把它们想成 CPU �
 | xPSR | 状态标志（进位、零标志等） | 给个合法初值，CPU 恢复后状态才不乱 |
 | R4–R11 | 一组通用寄存器 | 第一次没有有效值，先占好位置，凑齐一整套现场 |
 
-把端口层的 `pxPortInitialiseStack()`（[port.c:202](reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:202)）压成伪代码，它干的就是照着上面这张表，**把口袋一个个塞进栈**：
+把端口层的 `pxPortInitialiseStack()`（[port.c:202](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:202)）压成伪代码，它干的就是照着上面这张表，**把口袋一个个塞进栈**：
 
 ```c
 top--;  *top = xPSR;             /* 213: 状态标志，给个合法初值 */
@@ -194,13 +194,13 @@ return top;                      /* 230: 新栈顶，交给 TCB 记住 */
 
 看着一连串 `top--` 别发怵，它只是**在栈上从高地址往低地址、一格一格往下放**，把表里那几个口袋依次摆好而已。摆完，`return` 出去的那个栈顶地址，就是一张"从这里开始把现场倒回 CPU"的**书签**。demo 输出里那三个词正好对得上：`entry_slot` 是 PC，`parameter_slot` 是 R0，`top` 就是这张要交给 TCB 收好的书签。真实版本还多摆了 xPSR、LR、R4–R11，但**主线永远只有三样：入口、参数、栈顶**。
 
-谁来招呼工头摆这一套？是创建任务时的 `prvInitialiseNewTask()`（[tasks.c:1816](reference/rtos_src/FreeRTOS-Kernel/tasks.c:1816)）：它先算好栈顶地址，再把入口、参数、栈顶交给端口层去摆初始现场。摆好的栈顶，最后落进 TCB 的第一个字段 `pxTopOfStack`（[tasks.c:377](reference/rtos_src/FreeRTOS-Kernel/tasks.c:377)）——它被特意排在结构体最前面，好让切换时那段汇编用最快的方式一把够到它。
+谁来招呼工头摆这一套？是创建任务时的 `prvInitialiseNewTask()`（[tasks.c:1816](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c:1816)）：它先算好栈顶地址，再把入口、参数、栈顶交给端口层去摆初始现场。摆好的栈顶，最后落进 TCB 的第一个字段 `pxTopOfStack`（[tasks.c:377](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c:377)）——它被特意排在结构体最前面，好让切换时那段汇编用最快的方式一把够到它。
 
 | demo 里的动作 | FreeRTOS 源码里的证据 | 要理解的含义 |
 | --- | --- | --- |
-| `entry_slot = entry` | [port.c:215](reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:215) 把入口放进初始 PC 位 | 第一次恢复现场，CPU 就落到任务入口 |
-| `parameter_slot = parameter` | [port.c:221](reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:221) 把参数放到 R0 位 | 任务入口第一次运行就能拿到 `pvParameters` |
-| `return top_of_stack` | [port.c:230](reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:230) 返回新栈顶 | 栈顶交给 `pxTopOfStack`，将来靠它恢复 |
+| `entry_slot = entry` | [port.c:215](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:215) 把入口放进初始 PC 位 | 第一次恢复现场，CPU 就落到任务入口 |
+| `parameter_slot = parameter` | [port.c:221](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:221) 把参数放到 R0 位 | 任务入口第一次运行就能拿到 `pvParameters` |
+| `return top_of_stack` | [port.c:230](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:230) 返回新栈顶 | 栈顶交给 `pxTopOfStack`，将来靠它恢复 |
 
 ![任务初始栈帧：函数怎样第一次成为任务现场](img/fig-029-initial-task-stack-frame.png)
 
@@ -268,14 +268,14 @@ TCB is the scheduler handle: identity + stack + priority + list hook
 
 ### 2.3 回到 tasks.c：把字段接回使用它的机制
 
-打开真实 `TCB_t`（[tasks.c:375](reference/rtos_src/FreeRTOS-Kernel/tasks.c:375)）最容易挫败——字段太多，个个都像很重要。**破解办法是不按声明顺序背，而是按"谁会读写它"分组**。和当前主线相关的就四组，其余配置字段先搁一边，等读到队列、mutex、任务通知再回补：
+打开真实 `TCB_t`（[tasks.c:375](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c:375)）最容易挫败——字段太多，个个都像很重要。**破解办法是不按声明顺序背，而是按"谁会读写它"分组**。和当前主线相关的就四组，其余配置字段先搁一边，等读到队列、mutex、任务通知再回补：
 
 | TCB 字段 | 源码锚点 | 谁在用它 | 项目里能解释什么 |
 | --- | --- | --- | --- |
-| `pxTopOfStack` 现场 | [tasks.c:377](reference/rtos_src/FreeRTOS-Kernel/tasks.c:377) | PendSV、端口层 | 切换后从哪里恢复现场 |
-| `xStateListItem` 位置 | [tasks.c:387](reference/rtos_src/FreeRTOS-Kernel/tasks.c:387) | ready/delayed/suspended 列表 | 任务此刻在哪里 |
-| `xEventListItem` 位置 | [tasks.c:388](reference/rtos_src/FreeRTOS-Kernel/tasks.c:388) | queue/mutex/事件等待列表 | 任务在等哪个资源 |
-| `uxPriority` 调度 | [tasks.c:389](reference/rtos_src/FreeRTOS-Kernel/tasks.c:389) | 调度器、mutex 继承 | 谁更该先拿到 CPU |
+| `pxTopOfStack` 现场 | [tasks.c:377](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c:377) | PendSV、端口层 | 切换后从哪里恢复现场 |
+| `xStateListItem` 位置 | [tasks.c:387](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c:387) | ready/delayed/suspended 列表 | 任务此刻在哪里 |
+| `xEventListItem` 位置 | [tasks.c:388](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c:388) | queue/mutex/事件等待列表 | 任务在等哪个资源 |
+| `uxPriority` 调度 | [tasks.c:389](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c:389) | 调度器、mutex 继承 | 谁更该先拿到 CPU |
 
 注意 `pxTopOfStack` 被特意排在结构体**第一个字段**（源码注释也强调了 THIS MUST BE THE FIRST MEMBER）——因为上下文切换的汇编要用最快的方式够到它。这不是随意的声明顺序，而是给切换路径留的近道。
 
@@ -348,10 +348,10 @@ event_wait: LOG
 
 | 读什么 | 源码锚点 | 先抓住什么 |
 | --- | --- | --- |
-| 列表项结构 `ListItem_t` | [list.h:144](reference/rtos_src/FreeRTOS-Kernel/include/list.h:144) | `pxNext/pxPrevious/pxContainer` 说明它在哪个列表 |
-| 列表结构 `List_t` | [list.h:172](reference/rtos_src/FreeRTOS-Kernel/include/list.h:172) | 一个列表怎样保存尾节点、索引和数量 |
-| 有序插入 `vListInsert` | [list.c:139](reference/rtos_src/FreeRTOS-Kernel/list.c:139) | 任务或超时节点怎样进入某个位置 |
-| 移除节点 `uxListRemove` | [list.c:217](reference/rtos_src/FreeRTOS-Kernel/list.c:217) | 任务怎样离开当前位置，列表数量怎样变 |
+| 列表项结构 `ListItem_t` | [list.h:144](../../reference/rtos_src/FreeRTOS-Kernel/include/list.h:144) | `pxNext/pxPrevious/pxContainer` 说明它在哪个列表 |
+| 列表结构 `List_t` | [list.h:172](../../reference/rtos_src/FreeRTOS-Kernel/include/list.h:172) | 一个列表怎样保存尾节点、索引和数量 |
+| 有序插入 `vListInsert` | [list.c:139](../../reference/rtos_src/FreeRTOS-Kernel/list.c:139) | 任务或超时节点怎样进入某个位置 |
+| 移除节点 `uxListRemove` | [list.c:217](../../reference/rtos_src/FreeRTOS-Kernel/list.c:217) | 任务怎样离开当前位置，列表数量怎样变 |
 
 把源码压成动作骨架，`move`/`remove` 到底发生了什么就一目了然：
 
@@ -432,9 +432,9 @@ ready list after creation:
 
 | 入职环节 | 源码入口 | 干的活 |
 | --- | --- | --- |
-| 收材料 | [`xTaskCreateStatic()`](reference/rtos_src/FreeRTOS-Kernel/tasks.c:1332) | 接住应用给的静态栈、TCB、入口、参数、优先级 |
-| 建账页 + 摆现场 | [`prvInitialiseNewTask()`](reference/rtos_src/FreeRTOS-Kernel/tasks.c:1816) | 填 TCB，并调 [`pxPortInitialiseStack()`](reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:202) 摆好开工现场 |
-| 进候场区 | [`prvAddNewTaskToReadyList()`](reference/rtos_src/FreeRTOS-Kernel/tasks.c:2052) | 把新人挂进 ready 列表——**这一步只给资格，不给工作台** |
+| 收材料 | [`xTaskCreateStatic()`](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c:1332) | 接住应用给的静态栈、TCB、入口、参数、优先级 |
+| 建账页 + 摆现场 | [`prvInitialiseNewTask()`](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c:1816) | 填 TCB，并调 [`pxPortInitialiseStack()`](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:202) 摆好开工现场 |
+| 进候场区 | [`prvAddNewTaskToReadyList()`](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c:2052) | 把新人挂进 ready 列表——**这一步只给资格，不给工作台** |
 
 把它压成骨架，一眼就能看出"哪儿都没有真的让任务跑起来"：
 
@@ -494,9 +494,9 @@ tick=4 switch_to=COMM priority=3
 
 | 环节 | 源码入口 | 干的活 |
 | --- | --- | --- |
-| 一次派活从哪开始 | [`vTaskSwitchContext()`](reference/rtos_src/FreeRTOS-Kernel/tasks.c:5120) | 内核进入"挑当前任务"的入口 |
-| 挑最急的 | [`taskSELECT_HIGHEST_PRIORITY_TASK()`](reference/rtos_src/FreeRTOS-Kernel/tasks.c:236) | 从最高优先级的候场区里选出任务 |
-| 记下点名结果 | [`pxCurrentTCB`](reference/rtos_src/FreeRTOS-Kernel/tasks.c:463) | 当前任务指针指向被选中的 TCB |
+| 一次派活从哪开始 | [`vTaskSwitchContext()`](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c:5120) | 内核进入"挑当前任务"的入口 |
+| 挑最急的 | [`taskSELECT_HIGHEST_PRIORITY_TASK()`](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c:236) | 从最高优先级的候场区里选出任务 |
+| 记下点名结果 | [`pxCurrentTCB`](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c:463) | 当前任务指针指向被选中的 TCB |
 
 ![优先级挑人与同级轮转](img/fig-003.png)
 
@@ -512,10 +512,10 @@ tick=4 switch_to=COMM priority=3
 
 上一节结尾卡在一个悬念上：工头点了名（`pxCurrentTCB` 改指向 LOG 了），可 CPU 此刻还在 LED 的现场里跑——寄存器、栈指针、执行位置，全是 LED 的。**点名只是定了"下一个该谁"，真把人换上台，是另一码事。**
 
-这"换上台"其实分两种场合，难度差得远，得拆开讲：
+换班其实分两种情况，难度差得远：
 
-- **开工第一铃**：整台机器刚上电，工头第一次派人上台。这时候台上**还没有旧人要下台**，只需把准备好的第一个人扶上去，最简单。
-- **中途换班**：机器已经跑起来，要把台上这位换成另一位。这就得先把**旧人干到一半的现场收好**，再把**新人上次的现场摆回去**——这才是上下文切换的硬核，也是这一节的重头。
+- **开工第一铃**：机器是空的，刚刚打开，工头第一次派人上台。这时候台上**还没有旧人要下台**，只需把准备好的第一个人扶上去，最简单。
+- **中途换班**：机器已经跑起来，台上这位正在车床上车一批零件，才车到一半就被换下来。要让他将来还能接着车，就得先把**他这半成品、连同"车到第几刀、下一刀怎么走"的进度一起收好**（存旧人的现场），再把**新上台那位上回同样没做完的活摆回台面**（恢复新人的现场），让他接着干自己那批。这一存一取，才是上下文切换的硬核，也是这一节的重头。
 
 先讲简单的开工铃，再啃换班。
 
@@ -536,9 +536,9 @@ main stops owning CPU; task context owns execution
 
 | 环节 | 源码入口 | 干的活 |
 | --- | --- | --- |
-| 按开工铃 | [`vTaskStartScheduler()`](reference/rtos_src/FreeRTOS-Kernel/tasks.c:3700) | 建好 idle 任务、启动内核，转入端口层 |
-| 配硬件 | [`xPortStartScheduler()`](reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:305) | 配好 SysTick、PendSV 等异常优先级 |
-| 扶第一个人上台 | [`prvPortStartFirstTask()`](reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:278) → [`vPortSVCHandler()`](reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:260) | 从 `pxCurrentTCB` 取第一个任务的栈顶，把现场倒回 CPU |
+| 按开工铃 | [`vTaskStartScheduler()`](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c:3700) | 建好 idle 任务、启动内核，转入端口层 |
+| 配硬件 | [`xPortStartScheduler()`](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:305) | 配好 SysTick、PendSV 等异常优先级 |
+| 扶第一个人上台 | [`prvPortStartFirstTask()`](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:278) → [`vPortSVCHandler()`](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:260) | 从 `pxCurrentTCB` 取第一个任务的栈顶，把现场倒回 CPU |
 
 ![main 把控制权交给第一个任务](img/fig-006.png)
 
@@ -546,7 +546,7 @@ main stops owning CPU; task context owns execution
 
 开工之后，真正天天发生、也最容易讲晕的，是**换班**。先说清楚换的是什么。
 
-台上那位干活时，CPU 手边那一小把**寄存器**（§1 说的"随身口袋"）里，装着他此刻算到哪、下一条指令在哪、局部变量是几。这一把口袋的内容，就是他的**现场**。要把他换下去、又保证他将来能回来接着干，就必须**把他口袋里的东西原样收进他自己的柜子**；等他下次上台，再从柜子里把这套现场倒回口袋。
+台上那位车零件时，"车到第几刀、进给多少、下一步怎么走"这些临时数据，全攥在 CPU 手边那一小把**寄存器**里（§1 说的"随身口袋"）。这批半成品、加上这把记着加工进度的寄存器，合起来就是他的**现场**。要把他换下去、又保证他将来能接着车，就必须**把这套现场原样收进他自己的柜子**；等他下次上台，再从柜子里把它倒回来，接着上一刀往下车。
 
 这个"柜子"，就是每个任务自己的**栈**；而 **PSP（Process Stack Pointer）就是这个人自己柜子的钥匙**——一个专属的栈指针，指向他现场存放的位置。§2 讲过，TCB 的第一个字段 `pxTopOfStack` 存的正是这把钥匙。于是换班的骨架就三步，[`v7_pendsv_switch`](code/v7_pendsv_switch/demo.c) 把它拍得干干净净：
 
@@ -590,7 +590,7 @@ Cortex-M 有个规矩——**只要进异常，硬件会自动把一批寄存器
 
 ### 6.4 回到 port.c：一条很规整的搬运线
 
-把 [`xPortPendSVHandler()`](reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:504) 的汇编压成 C 风格骨架，它就是一条规整的搬运线：
+把 [`xPortPendSVHandler()`](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c:504) 的汇编压成 C 风格骨架，它就是一条规整的搬运线：
 
 ```c
 old_psp = read_psp();                              /* 拿到旧人柜子的钥匙 */
@@ -605,7 +605,7 @@ write_psp(new_psp);
 return_via_exc_return();   /* bx r14：异常返回，硬件自动弹回那半张交接单 */
 ```
 
-盯住**两次方向反转**就抓住全部了：前半段方向是 `CPU → PSP → 旧 TCB`（把旧人现场收进柜子），后半段方向是 `新 TCB → PSP → CPU`（把新人现场倒回台上）。夹在中间的 [`vTaskSwitchContext()`](reference/rtos_src/FreeRTOS-Kernel/tasks.c:5120) **只翻当前任务牌、不搬一个寄存器**——保存和恢复全在端口层。这也正是 §5 那句"**点名≠切过去**"落到汇编上的样子。
+盯住**两次方向反转**就抓住全部了：前半段方向是 `CPU → PSP → 旧 TCB`（把旧人现场收进柜子），后半段方向是 `新 TCB → PSP → CPU`（把新人现场倒回台上）。夹在中间的 [`vTaskSwitchContext()`](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c:5120) **只翻当前任务牌、不搬一个寄存器**——保存和恢复全在端口层。这也正是 §5 那句"**点名≠切过去**"落到汇编上的样子。
 
 最后那个 `bx r14` 也别当普通函数返回读。此刻 `r14` 里装的是 `EXC_RETURN`，它触发的是**异常返回**：CPU 按这个值回到线程模式、改用新人的 PSP、（若有）连 FPU 现场一起恢复，然后硬件自动把那半张自动交接单弹回寄存器——新人这才真正站上了台。
 
