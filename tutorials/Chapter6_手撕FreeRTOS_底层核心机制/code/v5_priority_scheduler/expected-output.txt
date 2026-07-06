@@ -1,0 +1,7 @@
+tick=0 switch_to=LED priority=2
+tick=1 switch_to=SENSOR priority=2
+tick=2 switch_to=LED priority=2
+event: COMM becomes ready
+tick=3 switch_to=COMM priority=3
+tick=4 switch_to=COMM priority=3
+

@@ -1,0 +1,13 @@
+t=000 LED toggle
+t=000 SENSOR sample
+t=020 SENSOR sample
+t=040 SENSOR sample
+t=040 LOG flush chunk, main loop blocked 35ms
+t=075 LED toggle
+t=075 SENSOR sample
+t=075 LOG flush chunk, main loop blocked 35ms
+t=110 LED toggle
+t=110 SENSOR sample
+t=110 LOG flush chunk, main loop blocked 35ms
+result: LED and SENSOR are delayed by slow LOG work
+

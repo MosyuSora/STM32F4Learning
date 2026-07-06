@@ -1,0 +1,7 @@
+init LED    stack_base=<addr> top=<addr> entry_slot=<entry> parameter_slot=<parameter>
+init SENSOR stack_base=<addr> top=<addr> entry_slot=<entry> parameter_slot=<parameter>
+scheduler restores LED stack
+run task=LED parameter=heartbeat
+scheduler restores SENSOR stack
+run task=SENSOR period_ms=20
+

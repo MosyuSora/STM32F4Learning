@@ -1,0 +1,9 @@
+LOG receive -> queue empty, receiver waits
+COMM send 10 -> count=1
+wake receiver LOG
+COMM send 11 -> count=2
+COMM send 12 -> queue full, sender waits
+LOG receive 10 -> count=1
+wake sender COMM
+COMM send 12 -> count=2
+

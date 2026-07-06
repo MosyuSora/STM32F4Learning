@@ -1,0 +1,5 @@
+main: create tasks and start scheduler
+SVC model: restore the prepared first task context
+first task=COMM priority=3
+main stops owning CPU; task context owns execution
+
