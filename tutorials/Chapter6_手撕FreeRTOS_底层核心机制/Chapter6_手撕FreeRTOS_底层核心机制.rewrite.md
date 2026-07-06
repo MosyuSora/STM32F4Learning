@@ -270,33 +270,40 @@ TCB is the scheduler handle: identity + stack + priority + list hook
 
 同一个 LED 的 TCB，会被四种机制反复翻看：**创建**时被填好，**列表**移动时被挂到 ready/delayed，**调度**时被拿来比优先级，**PendSV** 切换时被取出栈顶。四个镜头看的是同一个对象，只是各取所需——这也解释了为什么这么多机制都要碰它。
 
-### 2.3 回到 tasks.c：把字段接回使用它的机制
+### 2.3 回到 tasks.c：这页账，真身长什么样
 
-打开真实 `TCB_t`（[tasks.c:375](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L375)）最容易挫败——字段太多，个个都像很重要。**破解办法是不按声明顺序背，而是按"谁会读写它"分组**。和当前主线相关的就四组，其余配置字段先搁一边，等读到队列、mutex、任务通知再回补：
+打开真实的 `TCB_t`（[tasks.c:375](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L375)），会看到一长串字段。别被吓到——大半是 `#if config...` 裹着的**选配栏**（trace、任务通知、TLS 之类，用到某功能才占位）。把选配栏遮掉，剩下的**主干**恰好就是我们那页账的几栏：
 
-| TCB 字段 | 源码锚点 | 谁在用它 | 项目里能解释什么 |
-| --- | --- | --- | --- |
-| `pxTopOfStack` 现场 | [tasks.c:377](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L377) | PendSV、端口层 | 切换后从哪里恢复现场 |
-| `xStateListItem` 位置 | [tasks.c:387](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L387) | ready/delayed/suspended 列表 | 任务此刻在哪里 |
-| `xEventListItem` 位置 | [tasks.c:388](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L388) | queue/mutex/事件等待列表 | 任务在等哪个资源 |
-| `uxPriority` 调度 | [tasks.c:389](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L389) | 调度器、mutex 继承 | 谁更该先拿到 CPU |
+```c
+typedef struct tskTaskControlBlock {
+    volatile StackType_t *pxTopOfStack;   /* 工位：现场存取入口 —— 务必排第一个 */
+    ListItem_t  xStateListItem;           /* 在哪块区：候场 / 等钟点 / 挂起 */
+    ListItem_t  xEventListItem;           /* 在哪块区：等料（队列 / 锁） */
+    UBaseType_t uxPriority;               /* 有多急：当前优先级 */
+    StackType_t *pxStack;                 /* 柜子底：栈的起始地址 */
+    char        pcTaskName[ configMAX_TASK_NAME_LEN ];  /* 是谁：名字 */
+    #if ( configUSE_MUTEXES == 1 )
+        UBaseType_t uxBasePriority;       /* 本来多急：还锁后复原用 */
+    #endif
+    /* …… 一大串 #if config 选配字段 …… */
+} tskTCB;
+```
 
-注意 `pxTopOfStack` 被特意排在结构体**第一个字段**（源码注释也强调了 THIS MUST BE THE FIRST MEMBER）——因为上下文切换的汇编要用最快的方式够到它。这不是随意的声明顺序，而是给切换路径留的近道。
+真正值得琢磨的，是它**为什么这么摆**——每一处安排背后都有个很实在的理由：
 
-![TCB 字段怎样被调度、列表、PendSV、队列使用](img/fig-030-tcb-field-usage-map.png)
+**① `pxTopOfStack` 凭什么排第一个字段？** 源码注释甚至用大写吼了一句 `THIS MUST BE THE FIRST MEMBER`。因为换班那段汇编（下一次 §6 会看到）要从 TCB 里**飞快地抓栈顶**——排在第一个，偏移量就是 0，一条 `ldr r0, [r2]` 直接命中，省掉加偏移那一步。**这不是随手排的声明顺序，是给最烫手的切换路径留的近道。**
 
-读这张字段图，别从字段名往下背，**从外侧机制往回问**：PendSV 为什么要找栈顶、调度器为什么看优先级、Delay 为什么能移动任务、mutex 为什么能找到等待者。每一问都落回 TCB 的某一组字段，结构体就变成了任务对象。demo 里那个 `list_owner=LED` 也有真实出处：内核从列表里拿到的只是一个 `ListItem_t`，靠的是节点里的 **owner 指针**（创建时由 `prvInitialiseNewTask` 一并初始化）把列表项指回 TCB——这是"任务位置"回到"任务身份"的**回家路**。
+**② 为什么要两块牌子（`xStateListItem` + `xEventListItem`）？** 因为一个工人**可能同时挂在两块区**。设想 COMM 去传送带那头等一批料、但只肯等 100 ms：这一刻它**既在等料区**（挂在传送带的等待名单上）、**又在等钟点区**（挂在延时名单上，等那个超时时刻），谁先到算谁的。可 §3 讲过——**一块牌子（一个 `ListItem_t`）同一时刻只能进一条列表**。要同时挂两处，身上就得有两块牌子。源码把这俩字段并排摆着，正是为这个。
 
-有了这页账，排查就有了固定入口。而 TCB 比普通业务结构体更值得警惕的一点是：**故障点常常不是破坏点**。PendSV 恢复现场时崩了，表面在切换，真凶可能是更早某个任务数组越界、把相邻 TCB 的栈顶字段写坏了。所以排查要沿时间往回看，也要按四组证据分开查：
+**③ 为什么优先级要留两栏（`uxPriority` 和 `uxBasePriority`）？** 而且 `uxBasePriority` 还被 `#if ( configUSE_MUTEXES == 1 )` 单独裹着——**没开互斥锁，压根没有这一栏**。这栏是给下一步的"钥匙"（§9 互斥锁）准备的：占着钥匙的低优先级工人会被**临时提级**赶工、还锁后再**复原**。这就得两个格子：`uxPriority` 记"现在多急"（可能被抬高），`uxBasePriority` 记"本来多急"（照它填回）。**一个编译开关，精准地说明了"这栏只为那个机制而生"**——用不到就不占地方。
 
-| TCB 证据 | 能解释的问题 | 项目里怎样观察 |
-| --- | --- | --- |
-| 任务名 | 调试器里认出是谁 | 任务列表、日志前缀、Trace 名称 |
-| 栈顶字段 | 恢复现场是否有根 | PSP 范围、栈水位、HardFault 现场 |
-| 优先级字段 | 为什么被选中或被压住 | 调度日志、ready 集合、继承前后优先级 |
-| 列表节点 | 任务到底在哪里 | ready / delayed / event wait 位置 |
+**④ 名字为什么是定长数组、不是指针？** `pcTaskName` 是 `char[configMAX_TASK_NAME_LEN]`，创建时把名字**整个抄进账页**，而不是记一个指向外部字符串的指针。这样这页账**自带身份、不依赖外头那个字符串还在不在**，调试器随时读得出"这是 LED"。
 
-**TCB 坏了，调度、列表、现场恢复会被一起牵连**，所以遇到"任务像随机失踪"的现象，要把 TCB 周边内存、栈溢出、数组越界、错误指针都拉进排查范围。下一节就顺着"列表节点"往下走：任务到底挂在哪里，为什么"它在哪个列表"比"它是不是卡住了"更有用。
+还有个小机关，正好补上"账本"和"三块区"之间的回路：工头从某块区捡起一块牌子（`ListItem_t`），怎么知道是哪个工人的？——**每块牌子背面都写着工号**。创建任务时，`listSET_LIST_ITEM_OWNER` 把牌子的 owner 指针指回它所属的 TCB；于是从列表里捞出一个节点，顺着 owner 就能回到那一页账。
+
+![TCB 字段怎样对应到工位、区、优先级、名字](img/fig-030-tcb-field-usage-map.png)
+
+一句话收束：**`TCB_t` 绝不是字段的随机堆叠，而是把"是谁、在哪块区、多急、工位在哪"这几件事，按各个机制取用它的方式精心排布的一页账。** 读它的正确姿势，是照着"哪个机制会翻哪一栏"去认，而不是从头背到尾。下一节就顺着账里那两块牌子往下走，看任务究竟怎样在三块区之间移动。
 
 ## 3 内核列表：任务在系统里的位置地图
 
