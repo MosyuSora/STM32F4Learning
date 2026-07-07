@@ -90,6 +90,8 @@ xQueueCreateMutex
 prvInitialiseMutex
 xQueueSemaphoreTake
 xSemaphoreCreateMutex
+xSemaphoreCreateBinary
+xQueueCreateCountingSemaphore
 pxMutexHolder
 xMutexHolder
 uxRecursiveCallCount
