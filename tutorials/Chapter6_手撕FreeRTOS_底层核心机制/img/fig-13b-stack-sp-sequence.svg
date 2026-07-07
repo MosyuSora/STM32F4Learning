@@ -1,0 +1,59 @@
+<svg viewBox="0 0 780 400" xmlns="http://www.w3.org/2000/svg" role="img" font-family="ui-sans-serif, system-ui, 'Segoe UI', sans-serif">
+  <title>任务栈的动态生长：SP 随调用 / 中断 / 换任务一路下探</title>
+  <desc>四帧并排，从左到右是时间：① 刚创建栈几乎全空；② 调进两层函数 SP 下探；③ 被中断硬件再压异常帧；④ 被 PendSV 换下再压 R4-R11。栈向下生长。</desc>
+  <style>
+    svg{--ink:#1f2933;--mut:#64748b;--line:#94a3b8;--u1:#2563eb;--u1b:#dbeafe;
+        --u2:#7c3aed;--u2b:#ede9fe;--u3:#dc2626;--u3b:#fee2e2;--free:#eef2f7;}
+    @media (prefers-color-scheme:dark){svg{--ink:#e5e7eb;--mut:#94a3b8;--line:#64748b;
+        --u1:#60a5fa;--u1b:#1e3a5f;--u2:#a78bfa;--u2b:#3b2f63;--u3:#f87171;--u3b:#4c1d1d;--free:#334155;}}
+    .ink{fill:var(--ink)}.mut{fill:var(--mut)}.mono{font-family:ui-monospace,Menlo,monospace}
+  </style>
+  <text x="390" y="26" text-anchor="middle" class="ink" font-size="17" font-weight="700">任务栈的动态生长：SP 随调用 / 中断 / 换任务一路下探</text>
+  <text x="24" y="70" class="mut" font-size="11">高地址</text>
+  <text x="24" y="300" class="mut" font-size="11">低地址</text>
+  <text x="20" y="185" class="mono" font-size="11" fill="var(--u1)" transform="rotate(-90 20 185)" font-family="ui-monospace,Menlo,monospace">栈往下长 ↓</text>
+
+  <g>
+    <rect x="70" y="60" width="120" height="250" rx="3" fill="var(--free)" stroke="var(--line)"/>
+    <rect x="71" y="61" width="118" height="16" fill="var(--u1b)"/>
+    <line x1="70" y1="77" x2="190" y2="77" stroke="var(--u1)" stroke-width="2"/>
+    <text x="196" y="74" class="mono" font-size="10.5" fill="var(--u1)" font-family="ui-monospace,Menlo,monospace">←SP</text>
+    <text x="130" y="200" text-anchor="middle" class="mono mut" font-size="11">0xA5 · 全空</text>
+    <text x="130" y="330" text-anchor="middle" class="ink" font-size="12" font-weight="700">① 刚创建</text>
+    <text x="130" y="348" text-anchor="middle" class="mut" font-size="10">仅顶部一份初始帧</text>
+  </g>
+  <g>
+    <rect x="250" y="60" width="120" height="250" rx="3" fill="var(--free)" stroke="var(--line)"/>
+    <rect x="251" y="61" width="118" height="80" fill="var(--u1b)"/>
+    <line x1="250" y1="141" x2="370" y2="141" stroke="var(--u1)" stroke-width="2"/>
+    <text x="376" y="138" class="mono" font-size="10.5" fill="var(--u1)" font-family="ui-monospace,Menlo,monospace">←SP</text>
+    <text x="310" y="105" text-anchor="middle" class="mono" font-size="10" fill="var(--u1)">A、B 帧</text>
+    <text x="310" y="230" text-anchor="middle" class="mono mut" font-size="11">0xA5</text>
+    <text x="310" y="330" text-anchor="middle" class="ink" font-size="12" font-weight="700">② 调进两层</text>
+    <text x="310" y="348" text-anchor="middle" class="mut" font-size="10">返回地址+局部变量</text>
+  </g>
+  <g>
+    <rect x="430" y="60" width="120" height="250" rx="3" fill="var(--free)" stroke="var(--line)"/>
+    <rect x="431" y="61" width="118" height="80" fill="var(--u1b)"/>
+    <rect x="431" y="141" width="118" height="52" fill="var(--u3b)"/>
+    <line x1="430" y1="193" x2="550" y2="193" stroke="var(--u3)" stroke-width="2"/>
+    <text x="556" y="190" class="mono" font-size="10.5" fill="var(--u3)" font-family="ui-monospace,Menlo,monospace">←SP</text>
+    <text x="490" y="170" text-anchor="middle" class="mono" font-size="9.5" fill="var(--u3)">异常帧(硬件)</text>
+    <text x="490" y="255" text-anchor="middle" class="mono mut" font-size="11">0xA5</text>
+    <text x="490" y="330" text-anchor="middle" class="ink" font-size="12" font-weight="700">③ 被急件打断</text>
+    <text x="490" y="348" text-anchor="middle" class="mut" font-size="10">R0-R3/R12/LR/PC/xPSR</text>
+  </g>
+  <g>
+    <rect x="610" y="60" width="120" height="250" rx="3" fill="var(--free)" stroke="var(--line)"/>
+    <rect x="611" y="61" width="118" height="80" fill="var(--u1b)"/>
+    <rect x="611" y="141" width="118" height="52" fill="var(--u3b)"/>
+    <rect x="611" y="193" width="118" height="34" fill="var(--u2b)"/>
+    <line x1="610" y1="227" x2="730" y2="227" stroke="var(--u2)" stroke-width="2"/>
+    <text x="676" y="211" class="mono" font-size="9.5" fill="var(--u2)" text-anchor="middle">R4-R11</text>
+    <text x="670" y="255" text-anchor="middle" class="mono mut" font-size="11">0xA5</text>
+    <text x="670" y="330" text-anchor="middle" class="ink" font-size="12" font-weight="700">④ 被换下台</text>
+    <text x="670" y="348" text-anchor="middle" class="mut" font-size="10">PendSV 补压，栈顶存进 TCB</text>
+  </g>
+
+  <text x="390" y="384" text-anchor="middle" class="mut" font-size="11">时间 →　　SP 越走越低；返回 / 中断退出时再往上弹回</text>
+</svg>

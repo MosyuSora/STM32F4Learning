@@ -1,0 +1,55 @@
+<svg viewBox="0 0 780 430" xmlns="http://www.w3.org/2000/svg" role="img" font-family="ui-sans-serif, system-ui, 'Segoe UI', sans-serif">
+  <title>heap_4 的动态生长：切块 → 留洞 → 相邻空闲块自动合并</title>
+  <desc>四行，从上到下是时间：① 初始整片空闲；② 依次分配 A、B、C 三块；③ 释放 B 中间留下空洞（碎片）；④ 再释放 A、C，heap_4 发现相邻空闲块把它们合并回一大块。</desc>
+  <style>
+    svg{--ink:#1f2933;--mut:#64748b;--line:#94a3b8;--free:#eef2f7;--freeb:#94a3b8;
+        --a:#2563eb;--ab:#dbeafe;--b:#7c3aed;--bb:#ede9fe;--c:#0d9488;--cb:#ccfbf1;--hole:#f59e0b;}
+    @media (prefers-color-scheme:dark){svg{--ink:#e5e7eb;--mut:#94a3b8;--line:#64748b;--free:#293548;--freeb:#64748b;
+        --a:#60a5fa;--ab:#1e3a5f;--b:#a78bfa;--bb:#3b2f63;--c:#2dd4bf;--cb:#134e4a;--hole:#eab308;}}
+    .ink{fill:var(--ink)}.mut{fill:var(--mut)}.mono{font-family:ui-monospace,Menlo,monospace}
+    .blk{font-size:13;font-weight:700}
+  </style>
+  <text x="390" y="26" text-anchor="middle" class="ink" font-size="17" font-weight="700">heap_4 的动态生长：切块 → 留洞 → 相邻空闲块自动合并</text>
+  <text x="60" y="50" class="mut" font-size="11">低地址 pxStart</text>
+  <text x="720" y="50" class="mut" font-size="11" text-anchor="end">pxEnd 高地址</text>
+
+  <!-- row 1 -->
+  <text x="24" y="86" class="ink blk">①</text>
+  <rect x="60" y="66" width="660" height="34" rx="3" fill="var(--free)" stroke="var(--freeb)"/>
+  <text x="390" y="88" text-anchor="middle" class="mono mut" font-size="12">一整块空闲（xStart → pxEnd 一个 BlockLink 串起）</text>
+  <text x="60" y="120" class="mut" font-size="11">初始：整片可用</text>
+
+  <!-- row 2 -->
+  <text x="24" y="171" class="ink blk">②</text>
+  <rect x="60" y="151" width="150" height="34" rx="3" fill="var(--ab)" stroke="var(--a)"/>
+  <text x="135" y="173" text-anchor="middle" class="mono" font-size="12" fill="var(--a)">A</text>
+  <rect x="210" y="151" width="180" height="34" rx="3" fill="var(--bb)" stroke="var(--b)"/>
+  <text x="300" y="173" text-anchor="middle" class="mono" font-size="12" fill="var(--b)">B</text>
+  <rect x="390" y="151" width="130" height="34" rx="3" fill="var(--cb)" stroke="var(--c)"/>
+  <text x="455" y="173" text-anchor="middle" class="mono" font-size="12" fill="var(--c)">C</text>
+  <rect x="520" y="151" width="200" height="34" rx="3" fill="var(--free)" stroke="var(--freeb)"/>
+  <text x="620" y="173" text-anchor="middle" class="mono mut" font-size="11">剩余空闲</text>
+  <text x="60" y="205" class="mut" font-size="11">pvPortMalloc 从空闲块头部切走 A、B、C，块头 MSB 置 1 标“已分配”</text>
+
+  <!-- row 3 -->
+  <text x="24" y="256" class="ink blk">③</text>
+  <rect x="60" y="236" width="150" height="34" rx="3" fill="var(--ab)" stroke="var(--a)"/>
+  <text x="135" y="258" text-anchor="middle" class="mono" font-size="12" fill="var(--a)">A</text>
+  <rect x="210" y="236" width="180" height="34" rx="3" fill="none" stroke="var(--hole)" stroke-width="2" stroke-dasharray="5 3"/>
+  <text x="300" y="258" text-anchor="middle" class="mono" font-size="11.5" fill="var(--hole)" font-weight="700">空洞(碎片)</text>
+  <rect x="390" y="236" width="130" height="34" rx="3" fill="var(--cb)" stroke="var(--c)"/>
+  <text x="455" y="258" text-anchor="middle" class="mono" font-size="12" fill="var(--c)">C</text>
+  <rect x="520" y="236" width="200" height="34" rx="3" fill="var(--free)" stroke="var(--freeb)"/>
+  <text x="620" y="258" text-anchor="middle" class="mono mut" font-size="11">剩余空闲</text>
+  <text x="60" y="290" class="mut" font-size="11">vPortFree(B)：B 回到空闲链，但夹在 A、C 之间——单独一个洞，接不上大块</text>
+
+  <!-- row 4 -->
+  <text x="24" y="341" class="ink blk">④</text>
+  <rect x="60" y="321" width="460" height="34" rx="3" fill="var(--free)" stroke="var(--freeb)" stroke-width="2"/>
+  <text x="290" y="343" text-anchor="middle" class="mono" font-size="12" fill="var(--ink)">A+B+C 合并回一整块空闲</text>
+  <rect x="520" y="321" width="200" height="34" rx="3" fill="var(--free)" stroke="var(--freeb)"/>
+  <text x="620" y="343" text-anchor="middle" class="mono mut" font-size="11">剩余空闲</text>
+  <text x="60" y="375" class="mut" font-size="11">再 free(A)、free(C)：prvInsertBlockIntoFreeList 按地址排序，发现首尾相邻→合并</text>
+
+  <text x="390" y="410" text-anchor="middle" class="mut" font-size="11.5">↓ 时间　　合并（coalesce）是 heap_4 相比 heap_2 的关键：碎片能重新长回大块</text>
+</svg>
