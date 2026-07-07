@@ -363,45 +363,71 @@ event_wait: LOG
 
 **别把它当链表操作读，当"走位"读**：每一行 `move`，都是工头把某个工人挪进了某块区。前三行，三个人先都进候场区；接着 SENSOR 被挪去等钟点区（它要等下一次采样时间到），LOG 被挪去等料区（它在等一个事件）。末尾那三行，就是此刻的车间一览：候场区只剩 LED，等钟点区是 SENSOR，等料区是 LOG。这张快照比一句"系统卡了"有用太多——它直接告诉你，下一步该去催谁上台、该给谁送料。
 
-### 3.3 回到 list.c：挪人，其实就是换一块牌子
+### 3.3 回到 list.c：一块牌子、一块区、两个动作
 
-那"把工人挪块区"，落到代码里到底是什么动作？说穿了朴素得很：**每个工人身上挂着一块牌子，写着"我归哪块区"**——挪区，就是改这块牌子，再顺手给两块区的人数各自加减一下。所以读 `list.c` 不必当数据结构课，**只追三件事：谁把工人挂进一块区、谁把他摘出来、那块牌子怎样从区里指回工人本人**。
+"把工人挪块区"，落到代码里就是改牌子。可这套牌子和区，源码设计得极其精巧——手撕一下，你会发现好几处"为什么这么写"都藏着巧劲。
 
-| 读什么 | 源码锚点 | 先抓住什么 |
-| --- | --- | --- |
-| 列表项结构 `ListItem_t` | [list.h:144](../../reference/rtos_src/FreeRTOS-Kernel/include/list.h#L144) | `pxNext/pxPrevious/pxContainer` 说明它在哪个列表 |
-| 列表结构 `List_t` | [list.h:172](../../reference/rtos_src/FreeRTOS-Kernel/include/list.h#L172) | 一个列表怎样保存尾节点、索引和数量 |
-| 有序插入 `vListInsert` | [list.c:139](../../reference/rtos_src/FreeRTOS-Kernel/list.c#L139) | 任务或超时节点怎样进入某个位置 |
-| 移除节点 `uxListRemove` | [list.c:217](../../reference/rtos_src/FreeRTOS-Kernel/list.c#L217) | 任务怎样离开当前位置，列表数量怎样变 |
+#### 3.3.1 一块牌子（ListItem_t）上刻了哪些字段
 
-把源码压成动作骨架，`move`/`remove` 到底发生了什么就一目了然：
+先看牌子本身，`ListItem_t`（[list.h:144](../../reference/rtos_src/FreeRTOS-Kernel/include/list.h#L144)）遮掉体检字段，只剩四样：
 
 ```c
-/* insert：进某块区 */
-item->pxContainer = list;        /* 挂上牌子：我归这块区 */
-list->uxNumberOfItems++;         /* 这块区人数 +1 */
-
-/* remove：离开这块区 */
-list = item->pxContainer;
-item->pxContainer = NULL;        /* 摘掉牌子 */
-list->uxNumberOfItems--;         /* 这块区人数 -1 */
+struct xLIST_ITEM {
+    TickType_t             xItemValue;   /* 牌子上的"号"：多数时候用来排序 */
+    struct xLIST_ITEM     *pxNext;       /* 前一位、后一位：双向手拉手 */
+    struct xLIST_ITEM     *pxPrevious;
+    void                  *pvOwner;      /* 牌子背面的工号：指回 TCB */
+    struct xLIST          *pxContainer;  /* 牌子正面：我此刻归哪块区 */
+};
 ```
 
-`move SENSOR -> delayed` 不是复制一个 SENSOR，而是**同一个任务对象的列表节点进入了 delayed list**；`remove LOG <- ready` 说明 LOG 离开 ready 候选集合，调度器不该再从 ready 里选到它。**链表函数本身很普通，它的意义全来自调用者**：Delay 调用 `vListInsert` 是为了按唤醒时间放进 delayed，队列调用它是为了把等待者挂到 event list，调度路径读 ready list 是为了找有资格的任务。
+对着引子一栏栏认：`pxContainer` 是牌子**正面**——写着"我归候场区/等钟点区/等料区"；`pvOwner` 是牌子**背面的工号**——指回它所属的 TCB（§2.3 那句"牌子背面写工号"的真身）。这俩一正一反，**把"人"和"他的位置"双向锁死**：从区里捞到一块牌子，翻背面就知道是谁；拿到一个人，看他牌子正面就知道他在哪。
 
-这块牌子（`pxContainer`）本身就是一条很实用的排查线：牌子写着候场区，他就该真站在候场区；被摘出来后，牌子该清空。**如果一个工人看着像同时站在两块区，或早被摘走却还被当成在册，八成是重复挪动、重复摘牌，或者内存被写坏了**——而且列表很少无缘无故坏，多半是工人对象、等待对象或内存边界先出的问题。
+`pxNext/pxPrevious` 是**双向**的——不是单链表。为什么？因为工头经常要把一个人**从队伍正中间**直接抽走（比如 COMM 在等料区排到一半，料来了就得立刻拎出来）。双向手拉手，抽人时左右两位一牵手就接上了，**不用从头找一遍，一步到位**。
 
-所以项目里说"任务 blocked"其实还不够。同样一句 blocked，COMM 可能在 `RX_QUEUE` 的接收等待列表上（外部事件没来），可能已被唤醒回 ready 却被更高优先级压住，也可能卡在 UART mutex 的等待链上（被资源 owner 挡住）。三种都让 COMM 暂时没输出，原因却南辕北辙。**把"卡住了"翻译成"在哪个列表"，就是从凭感觉调试走向按证据调试的起点**：
+`xItemValue` 是牌子上写的一个"号"，多数时候拿来**排序**——这个号，下面马上会用到。
 
-| 任务位置 | 看起来的现象 | 下一步证据 |
-| --- | --- | --- |
-| delayed list | 周期任务暂时没输出 | wake tick、当前 tick、到期是否回 ready |
-| queue event list | 消费者等不到数据 | queue count、发送方是否运行、等待超时 |
-| mutex event list | 高优先级任务被挡住 | owner、waiter、持锁时间、是否发生继承 |
-| ready list | 有资格却没运行 | 优先级、同级轮转、当前任务、PendSV |
-| 列表节点异常 | 状态混乱或崩溃 | TCB 完整性、越界写、栈水位 |
+#### 3.3.2 一块区（List_t）怎么组织：一个永远排最后的"假人"
 
-位置清楚了，源码就不再是一堆函数名，而是一条走位路线：进某块区、离开某块区、回到候场、再等派活。可再往前倒一步会冒出个更根上的问题——**这个"工人"当初是怎么被招进来、又怎么第一次站进候场区的**？下一节就看这一步：任务创建。
+再看区，`List_t`（[list.h:172](../../reference/rtos_src/FreeRTOS-Kernel/include/list.h#L172)）就三样有用的：
+
+```c
+typedef struct xLIST {
+    UBaseType_t   uxNumberOfItems;   /* 这块区几个人 */
+    ListItem_t   *pxIndex;           /* 巡查游标：上次点到谁 */
+    MiniListItem_t xListEnd;         /* 哨兵：一个号最大、永远排最后的"假人" */
+} List_t;
+```
+
+`xListEnd` 是全章最值得拍案的一处设计。**每块区里都常驻一个"假人"哨兵**，它的 `xItemValue` 被设成**最大可能值**，所以永远排在队尾。图它什么？——**图省掉一切边界特判**。有了这个永不消失的假人，区就永远不是"空指针"：往里插人、从里抽人，代码都不必再为"这区是空的吗""插的是队头吗""删的是最后一个吗"写一堆 `if`。尤其有序插入时，新人一路往后比号，**比到假人这儿必然停下**（谁也大不过它），天然就是循环的终点。一个假人，把链表最烦的边界情况全抹平了。
+
+`pxIndex` 是把**巡查游标**。轮到从候场区选人上台时，工头不是每次都从头点名，而是**从上次停的地方接着往下点**——于是同样急的几个人，就一轮一轮地轮着来。§5 说的"同优先级轮转"，真身就是这根游标在候场区里一圈圈地走。
+
+#### 3.3.3 挪人：vListInsert 与 uxListRemove 两个动作
+
+有了牌子和区，"挪人"就落到两个函数上。压成骨架：
+
+```c
+/* vListInsert：进某块区（list.c:139）*/
+按 xItemValue 从小到大，找到该插的位置;   /* 走到哨兵必停 */
+把新牌子的 pxNext/pxPrevious 接进链;
+item->pxContainer = list;                  /* 挂正面：我归这块区 */
+list->uxNumberOfItems++;
+
+/* uxListRemove：离开这块区（list.c:217）*/
+item->pxPrevious->pxNext = item->pxNext;   /* 左右两位牵手，一步抽离 */
+item->pxNext->pxPrevious = item->pxPrevious;
+item->pxContainer = NULL;                  /* 摘牌 */
+list->uxNumberOfItems--;
+```
+
+`vListInsert`（[list.c:139](../../reference/rtos_src/FreeRTOS-Kernel/list.c#L139)）最关键的是**"有序"**二字——它按 `xItemValue` 升序插。等钟点区正是靠这个：每个人牌子上的号，写的就是他"该被叫醒的那个 tick"，于是**最早到点的人永远排在队头**。这样 §7 里挂钟每响一下，工头只需**瞄一眼队头**就知道有没有人到点，根本不用翻整队——一个排序，把每次 tick 的开销从"看所有人"压到了"看一个人"。
+
+`uxListRemove`（[list.c:217](../../reference/rtos_src/FreeRTOS-Kernel/list.c#L217)）则把 3.3.1 那个双向指针用满：左右两位一牵手，任意位置的人**一步抽离**，再摘牌、人数减一。
+
+回到 demo：`move SENSOR -> delayed` 不是复制一个 SENSOR，而是**同一个人的那块牌子，正面从"候场"改成了"等钟点"**；`remove LOG <- ready` 是 LOG 的牌子被摘下、从候场区的链里牵走。**链表函数本身普通得很，精巧全在这套牌子—哨兵—游标的组织上**：它让"一个人在哪、这块区有谁、下一个轮到谁"三件事，都变成了 O(1) 或近乎白送的操作。
+
+牌子和区都摸透了。可我们一直默认工人"本来就在那儿"——**他当初是怎么被招进来、第一次站进候场区的**？下一节看任务创建。
 
 ## 4 任务创建：给新人办入职，不等于让他上台
 
