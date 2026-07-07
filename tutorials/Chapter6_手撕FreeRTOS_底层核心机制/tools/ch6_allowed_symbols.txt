@@ -71,6 +71,14 @@ prvAddCurrentTaskToDelayedList
 
 # --- queue / semaphore / mutex ---
 Queue_t
+pcHead
+pcWriteTo
+pcTail
+pcReadFrom
+uxMessagesWaiting
+uxItemSize
+xTasksWaitingToSend
+xTasksWaitingToReceive
 xQueueCreate
 xQueueGenericSend
 xQueueReceive
