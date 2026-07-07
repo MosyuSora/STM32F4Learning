@@ -504,30 +504,60 @@ ready list after creation:
 
 放回项目里，这句话就是启动阶段的分界线：`xTaskCreateStatic()` 返回成功、任务入口却没打印第一条日志，**先别急着改入口函数**——先确认 TCB 和栈材料是不是长期有效、人是不是真进了候场区，再看调度器启没启动、是不是被更急的任务一直压着。
 
-### 4.3 回到 tasks.c：入职手续的三张单子
+### 4.3 回到 tasks.c：入职三步，步步有讲究
 
-真实的入职手续，就是三个函数接力，正好对上 demo 那三步：
+入职落到源码，就是三个函数接力。可别以为是三句大白话——手撕进去，每一步里都塞着"为什么非这么写不可"的讲究。
+
+#### 4.3.1 三步接力：哪一步都没让人真的上台
 
 | 入职环节 | 源码入口 | 干的活 |
 | --- | --- | --- |
 | 收材料 | [`xTaskCreateStatic()` `L1332`](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L1332) | 接住应用给的静态栈、TCB、入口、参数、优先级 |
 | 建账页 + 摆现场 | [`prvInitialiseNewTask()` `L1816`](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L1816) | 填 TCB，并调 [`pxPortInitialiseStack()` `L202`](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c#L202) 摆好开工现场 |
-| 进候场区 | [`prvAddNewTaskToReadyList()` `L2052`](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L2052) | 把新人挂进 ready 列表——**这一步只给资格，不给工作台** |
+| 进候场区 | [`prvAddNewTaskToReadyList()` `L2052`](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L2052) | 把新人挂进就绪表——**只给资格，不给工作台** |
 
-把它压成骨架，一眼就能看出"哪儿都没有真的让任务跑起来"：
+压成骨架，一眼就看出**哪一步都没有真的让任务跑起来**：
 
 ```c
-prvInitialiseNewTask(entry, name, priority, parameter, pxNewTCB);   /* 填账页 */
-pxNewTCB->pxTopOfStack = pxPortInitialiseStack(...);                /* 摆开工现场 */
+prvInitialiseNewTask(entry, name, priority, parameter, pxNewTCB);   /* 填账页、摆现场 */
 prvAddNewTaskToReadyList(pxNewTCB);                                 /* 送进候场区 */
-return (TaskHandle_t) pxNewTCB;                                     /* 交回一个句柄，人却还没上台 */
+return (TaskHandle_t) pxNewTCB;                                     /* 交回句柄，人却还没上台 */
 ```
 
 ![任务创建的四步组装线](img/fig-012.png)
 
-这张图顺着看是入职流程，倒着看就是排查顺序：任务没跑，先确认它有没有被装成对象、有没有进候场区，**再**去怀疑调度和入口逻辑。静态创建还有个专属的坑——**材料的生命周期**：交给它的栈数组和 TCB 缓冲区必须长期活着，绝不能是某个函数里一返回就失效的局部变量，否则人还在候场区，工位和账页却已经被回收了。
+真正的手艺，藏在中间那步 `prvInitialiseNewTask` 里。
 
-新人办完入职，就该轮到工头发话了：候场区里好几个人都想上，工作台只有一个——**派谁**？
+#### 4.3.2 prvInitialiseNewTask：那些不起眼却讲究的动作
+
+翻开 `prvInitialiseNewTask`（[tasks.c:1816](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L1816)），会看到一串平平无奇的赋值。可每一行几乎都在解决一个具体问题：
+
+- **先把柜子刷一层漆（栈染色）**：`memset(pxStack, 0xA5, …)`——工位还没人用，先把整个栈刷成同一种漆（`0xA5`）。图啥？将来看这层漆被磨掉了多少，就知道这人干活时最深压到过哪一格——**栈到底用了多少、会不会溢出，一眼可量**。这就是"栈高水位"能测出来的根。
+- **栈顶不是随手取的，要对齐**：算栈顶时，不是简单取数组最后一格，而是往下**抹到 8 字节对齐**（Cortex-M 的硬性要求），还配了个 `configASSERT` 兜底。对不齐，将来异常压栈就会出乱子。
+- **名字一个字一个字抄**（正是 §2.3.4 那条）：逐字拷进 `pcTaskName`，遇 `\0` 就停，末尾还**强制补一个 `\0`**——哪怕你名字起超长，也保证不越界、读得出。
+- **优先级当场夹紧**：`configASSERT` 先挡一道，再把超界的值夹到 `configMAX_PRIORITIES - 1`。为什么这么谨慎？因为**这个优先级马上要拿去当数组下标**索引就绪表（§5 就见到）——下标一越界就是灾难。
+- **给两块牌子建档**：`vListInitialiseItem` 把 `xStateListItem`、`xEventListItem` 各初始化好，再用 `listSET_LIST_ITEM_OWNER` 把牌子背面的工号指回这页 TCB——**§2.3.5 那条双向链，就是在这一行接上的**。
+
+> 🎨 **配图提示词**（AI 生成后替换为图片）
+
+```text
+一张干净扁平的技术示意图，浅色背景，单一强调色。主题：任务栈的"染色"与高水位测量。
+画一根竖直的栈（一列格子），创建时整列填满同一种底色并标注 0xA5（未使用）；运行后
+下半段格子变成另一种颜色表示被写过，中间画一条水平"高水位线"，标注"任务用到过的最深处"。
+右侧一句话注解：未被覆盖的 0xA5 越少，说明栈越吃紧。中文标注，无阴影无渐变。
+```
+
+#### 4.3.3 进候场区，为什么裹在临界区里
+
+材料齐了，最后 `prvAddNewTaskToReadyList`（[tasks.c:2052](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L2052)）才把新人挂进候场区。注意它**整段裹在临界区里**（`taskENTER_CRITICAL`）——源码注释写得明白：别让中断在列表更新到一半时来碰它。
+
+为什么这么小心？因为**就绪表是工头（调度器）和中断都会伸手去碰的公共账**：挂一个人要改好几个指针、还要给任务总数 `uxCurrentNumberOfTasks` 加一。要是挂到一半被中断打断、它又恰好来读这张表，就会读到个残缺的半成品。临界区把这几下锁成"一口气做完"。
+
+顺带，这一步还会在两种情况下先把 `pxCurrentTCB` 指向新人：**这是头一个被创建的任务**，或者**调度器还没开工、而这人比当前记着的更急**。于是开工铃一响（§6），第一个被扶上台的，正好是最急的那位。
+
+一句提醒收尾：**静态创建把材料的生命周期交给了你**——那个栈数组和 TCB 缓冲区必须长期活着，绝不能是某个函数里一返回就失效的局部变量，否则人还在候场区，工位和账页却已被回收。
+
+新人办完入职、进了候场区，可工作台只有一个——**工头到底派谁上台**？下一节，调度。
 
 ## 5 调度：候场区好几个人，工头派谁上台
 
