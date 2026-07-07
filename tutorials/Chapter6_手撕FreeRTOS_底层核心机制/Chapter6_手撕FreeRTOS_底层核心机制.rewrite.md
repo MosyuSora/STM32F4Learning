@@ -1359,9 +1359,88 @@ if( listLIST_IS_EMPTY( &pxQueue->xTasksWaitingToReceive ) == pdFALSE )
 
 ## PART4 内存：栈与堆
 
-## 13 任务的栈：多大、防溢出、双栈
+## 13 任务的栈：一格柜子，多深、会不会塞爆
 
-> （待写）栈该多大怎么估、栈溢出检测两法（染色 / MPU）、高水位 uxTaskGetStackHighWaterMark、MSP / PSP 双栈、静态 vs 动态。
+§1、§6 反复说，每个工人有自己的一格**柜子**——存现场、存局部变量，函数每调进一层就往里再塞一层。前面我们把它当"现场存取的入口"用，这一节把它当**一块实打实的 RAM** 来看：它多深、朝哪个方向塞、塞爆了怎么被发现，还有一件常被忽略的事——车间里其实有**两种柜子**。
+
+### 13.1 柜子的内存布局：从柜口往柜底塞
+
+一格柜子，就是创建时给这个任务划的一段连续 RAM（一个 `StackType_t` 数组）。两个地址锁住它的两头：`pxStack` 是**柜底**（低地址），`pxEndOfStack` 是**柜口**（高地址）。关键一点——**Cortex-M 的栈是"向下长"的**：SP（栈指针）从柜口那头（高地址）起步，每塞一层（一次函数调用、一次中断压栈）就往柜底（低地址）挪一截。
+
+![任务栈的内存布局](img/fig-13-stack-layout.svg)
+
+对着图记三件事：
+
+- **上半是已用、下半是空的**。SP 走过的地方（柜口往下），是真实的现场和局部变量；还没走到的（柜底那半），仍是创建时刷的那层 **`0xA5` 漆**（§4.3.2 那记 `memset`，用场就在这儿）。
+- **历史最深那条线，叫高水位**。SP 一辈子往下探到过的最低点——它离柜底还剩多少 `0xA5`，就是这格柜子还剩多少余量。
+- **撞穿柜底 `pxStack`，就是栈溢出**。SP 再往下就出了这格柜子、踩进隔壁的地盘——可能是相邻任务的柜子，甚至是它自己的 TCB。§2.3 说"故障点常不是破坏点"，一大半的诡异 HardFault，根子就在这一撞。
+
+### 13.2 柜子该开多深：别拍脑袋
+
+一个任务的栈深度，至少要装下这么几样叠加起来的东西：**最坏那条调用链的层数 × 每层的局部变量**，加上偶尔一个大数组、一次 `printf` 的格式化缓冲，**再加上——它正干活时被急件打断，硬件压进来的那套异常帧**（§11 说的 `R0-R3/R12/LR/PC/xPSR`，中断嵌套时还不止一层）。这最后一样最容易被忘，也最容易在"平时没事、一忙就崩"里坑人。
+
+开小了，就是**偶发栈溢出**——RTOS 里最难查的一类 bug（崩在哪、根子却在别处）。开大了，白占本就金贵的 RAM。正确姿势是：**先开个宽松值让它跑，再用"高水位"量出它实际用了多深，回头收到刚好留够余量。**
+
+### 13.3 回到源码：塞爆了怎么被当场抓住
+
+FreeRTOS 把"检查柜子塞没塞爆"塞进了**每一次换班**（§6 PendSV 切走一个任务前，先查它一眼）。开关是 `configCHECK_FOR_STACK_OVERFLOW`，1 和 2 两档，越查越狠。
+
+#### 13.3.1 法一（==1）：只看 SP 有没有探到柜底
+
+第一档最省事——换班时看一眼这任务的栈顶，是不是已经贴到柜底了（[stack_macros.h:70](../../reference/rtos_src/FreeRTOS-Kernel/include/stack_macros.h#L70)）：
+
+```c
+/* 当前存着的栈顶，还在柜子范围内吗？ */
+if( pxCurrentTCB->pxTopOfStack <= pxCurrentTCB->pxStack + portSTACK_LIMIT_PADDING )
+    vApplicationStackOverflowHook( pxCurrentTCB, pxCurrentTCB->pcTaskName );
+```
+
+`pxStack` 是柜底，栈顶要是 `<=` 柜底加一点点余量，说明 SP 已经探到危险区——立刻回调你写的 `vApplicationStackOverflowHook`。快，但有个盲区：它只在**换班那一刻**看 SP；要是任务在两次换班之间猛地扎到底、又缩回来了，这一档就抓不住。
+
+#### 13.3.2 法二（==2）：再查柜底那圈"守卫漆"还在不在
+
+第二档补上盲区——除了看 SP，**还去柜底摸一把那圈 `0xA5` 漆**（[stack_macros.h:103](../../reference/rtos_src/FreeRTOS-Kernel/include/stack_macros.h#L103)）：
+
+```c
+const uint32_t * const pulStack = ( uint32_t * ) pxCurrentTCB->pxStack;   /* 柜底那几格 */
+const uint32_t ulCheckValue = 0xa5a5a5a5U;                                /* 该有的漆 */
+if( ( pxCurrentTCB->pxTopOfStack <= pxCurrentTCB->pxStack + portSTACK_LIMIT_PADDING ) ||
+    ( pulStack[0] != ulCheckValue ) || ( pulStack[1] != ulCheckValue ) ||
+    ( pulStack[2] != ulCheckValue ) || ( pulStack[3] != ulCheckValue ) )
+    vApplicationStackOverflowHook( pxCurrentTCB, pxCurrentTCB->pcTaskName );
+```
+
+**柜底那几格的漆一旦被磨掉（不再是 `0xA5A5A5A5`），说明 SP 曾经扎穿到过这儿**——哪怕它事后缩了回去，漆也回不来了。就是图里那圈**守卫字节**。比法一多摸几个字节，代价极小，却能逮住"扎一下就跑"的偶发溢出。
+
+#### 13.3.3 高水位：数一数还剩几格没沾过
+
+同一层漆，还能反过来用——量出这格柜子**到底最深用到过哪**。`uxTaskGetStackHighWaterMark` 底下就一个循环（[tasks.c:6375](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L6375)）：
+
+```c
+static configSTACK_DEPTH_TYPE prvTaskCheckFreeStackSpace( const uint8_t *pucStackByte ) {
+    configSTACK_DEPTH_TYPE uxCount = 0U;
+    while( *pucStackByte == tskSTACK_FILL_BYTE ) {   /* 从柜底往上，一路数还没被磨掉的 0xA5 */
+        pucStackByte -= portSTACK_GROWTH;
+        uxCount++;
+    }
+    return uxCount / sizeof( StackType_t );           /* 换算成"还剩几格从没沾过" */
+}
+```
+
+从柜底起步，只要还是 `0xA5` 就往上数一格，一直数到第一格被磨掉的地方——**没被磨掉的格数，就是这格柜子的余量**。§13.2 说的"先开大、量高水位、再收"，量的就是它。数越小，说明柜子越吃紧、离塞爆越近。
+
+### 13.4 车间里其实有两种柜子：PSP 与 MSP
+
+最后一件容易忽略的事。Cortex-M **有两个栈指针**，对应两种柜子：
+
+- **PSP（Process Stack Pointer）**：**每个任务自己那格柜子**的钥匙，任务在"线程模式"下用它。§6 换班时 PendSV 读旧 PSP、写新 PSP——换的正是"当前用哪格柜子"。
+- **MSP（Main Stack Pointer）**：**内核和所有急件公用的那口大柜**，CPU 在"handler 模式"（跑异常/中断时）用它。
+
+为什么要分两口？——**这样急件就不啃任务的柜子**：一封急件闯进来（§11），handler 在 MSP 那口公用大柜里干活，不占用、也不会写坏某个任务那格本就不宽裕的 PSP 柜子。启动时（§6.1）`main` 一直用的是 MSP，直到第一个任务被扶上台，才切到 PSP。
+
+但有一处衔接得记牢，正好把 §13.2 那句"栈深度要留出异常帧"坐实：**一个任务正干着活被急件打断时，硬件是先把那套异常帧压进它自己的 PSP 柜子，再切去 MSP 跑 handler 的。** 所以每格任务柜子，都得替"随时可能到来的急件"预留出压异常帧的空间——留不够，急件一来就把柜子顶穿了。
+
+柜子（栈）是每个工人**创建时就分好、专属自己**的一块地。可队列、信号量、锁这些**运行中现造**的对象，它们的地又是从哪临时划出来的？那是另一位管家的活——**堆**。
 
 ## 14 heap_4：动态对象的 RAM 管家
 

@@ -1,0 +1,44 @@
+<svg viewBox="0 0 720 470" xmlns="http://www.w3.org/2000/svg" role="img" font-family="ui-sans-serif, system-ui, 'Segoe UI', sans-serif">
+  <title>任务栈的内存布局（Cortex-M：栈向下生长）</title>
+  <desc>一个任务的栈是一段 RAM，从高地址(pxEndOfStack/柜口)向低地址(pxStack/柜底)生长；上半是已用现场，中间是当前 SP 与历史高水位，下半仍是 0xA5 漆，柜底是守卫字节，SP 撞穿即溢出。</desc>
+  <style>
+    svg{--ink:#1f2933;--mut:#64748b;--line:#94a3b8;--used:#2563eb;--usedbg:#dbeafe;
+        --free:#e2e8f0;--danger:#dc2626;--guard:#f59e0b;}
+    @media (prefers-color-scheme:dark){svg{--ink:#e5e7eb;--mut:#94a3b8;--line:#64748b;
+        --used:#60a5fa;--usedbg:#1e3a5f;--free:#334155;--danger:#f87171;--guard:#eab308;}}
+    .ink{fill:var(--ink)} .mut{fill:var(--mut)} .mono{font-family:ui-monospace,Menlo,monospace}
+  </style>
+  <defs><marker id="dn" markerWidth="9" markerHeight="9" refX="4.5" refY="8" orient="auto">
+    <path d="M0 0 L4.5 8 L9 0" fill="none" stroke="var(--used)" stroke-width="1.6"/></marker></defs>
+
+  <text x="360" y="30" text-anchor="middle" class="ink" font-size="18" font-weight="700">任务栈的内存布局（Cortex-M：栈向下生长）</text>
+
+  <text x="250" y="60" text-anchor="middle" class="mut" font-size="12">↑ 高地址</text>
+  <text x="250" y="452" text-anchor="middle" class="mut" font-size="12">↓ 低地址</text>
+
+  <rect x="250" y="68" width="220" height="360" rx="4" fill="none" stroke="var(--line)" stroke-width="1.5"/>
+  <rect x="251" y="69" width="218" height="120" fill="var(--usedbg)"/>
+  <text x="360" y="112" text-anchor="middle" class="ink" font-size="13" font-weight="700">已用</text>
+  <text x="360" y="132" text-anchor="middle" class="mut" font-size="11">现场 + 局部变量 + 调用链</text>
+  <text x="360" y="150" text-anchor="middle" class="mut" font-size="11">（被中断时还压入异常帧）</text>
+  <line x1="251" y1="189" x2="469" y2="189" stroke="var(--used)" stroke-width="2" stroke-dasharray="6 3"/>
+  <line x1="251" y1="225" x2="469" y2="225" stroke="var(--danger)" stroke-width="2"/>
+  <rect x="251" y="226" width="218" height="163" fill="var(--free)"/>
+  <text x="360" y="300" text-anchor="middle" class="ink" font-size="13" font-weight="700">未用</text>
+  <text x="360" y="320" text-anchor="middle" class="mut mono" font-size="12">仍是 0xA5 漆</text>
+  <rect x="251" y="389" width="218" height="38" fill="var(--guard)" opacity="0.85"/>
+  <text x="360" y="413" text-anchor="middle" font-size="11.5" font-weight="700" fill="#3b2600">守卫字节 0xA5A5A5A5</text>
+
+  <line x1="212" y1="78" x2="212" y2="410" stroke="var(--used)" stroke-width="2" marker-end="url(#dn)"/>
+  <text x="196" y="250" text-anchor="middle" font-size="12" fill="var(--used)" font-family="ui-monospace,Menlo,monospace" transform="rotate(-90 196 250)">栈往下长（SP 越走越低）</text>
+
+  <text x="486" y="74" class="mut mono" font-size="11.5" font-family="ui-monospace,Menlo,monospace">pxEndOfStack（柜口）</text>
+  <text x="486" y="193" font-size="11.5" fill="var(--used)" font-family="ui-monospace,Menlo,monospace">← 当前 SP</text>
+  <text x="486" y="229" font-size="11.5" fill="var(--danger)" font-family="ui-monospace,Menlo,monospace">← 历史最深＝高水位</text>
+  <text x="486" y="330" class="mut" font-size="11.5">高水位 = 数还剩几个 0xA5</text>
+  <text x="486" y="410" class="mono" font-size="11.5" font-family="ui-monospace,Menlo,monospace">pxStack（柜底）</text>
+  <text x="486" y="437" font-size="11.5" font-weight="700" fill="var(--danger)">SP 撞穿柜底 = 栈溢出</text>
+  <text x="486" y="453" class="mut" font-size="11">→ 踩烂隔壁的账（TCB / 别人的栈）</text>
+
+  <text x="250" y="447" text-anchor="middle" class="mut" font-size="11">创建时整格刷成 0xA5（§4.3.2）</text>
+</svg>
