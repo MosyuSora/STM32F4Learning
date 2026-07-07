@@ -1068,7 +1068,47 @@ LOW_LOG releases mutex, priority restores 3 -> 1
 
 ## 11 临界区与调度器挂起
 
-> （待写）taskENTER_CRITICAL（BASEPRI 嵌套）、vTaskSuspendAll（不关中断的轻量临界区）、uxSchedulerSuspended；把散在 §4.3.3 / §6.4.2 的收成体系。
+进这一 PART 之前，先把**第 2 章的裸机中断**捡回来——那一章我们已经讲透了半个中断：
+
+- 想让一个事件打断 CPU，要**两级使能**（外设自己的中断使能 + NVIC 通道使能）；
+- 中断来了，NVIC 这个"保安队长"按**优先级**决定放不放行、要不要抢占（嵌套）；
+- 放行后，CPU 顺着**向量表**找到对应的 `IRQHandler` 跳过去；
+- 进中断的一刹那，**硬件自动压一组寄存器**（`R0-R3`、`R12`、`LR`、`PC`、`xPSR`）到当前栈；Handler 干完，靠 `LR` 里那个特殊的 `EXC_RETURN` 触发**硬件弹栈**、回到断点。
+
+这套"怎么进、怎么出"，你其实在 §6 又见了一遍——**PendSV 手动补的那半寄存器、硬件自动弹的这半**，正是同一回事（PendSV 本身就是一个异常）。所以中断的**进出机制**，我们不重复了。这一 PART 补的是**另一半、也是 RTOS 真正新增的麻烦**：中断和一大堆任务挤在一起，会争抢同一批数据——内核怎么保证它们不打架。
+
+裸机时代，会争的只有两方：`main` 主循环和某个 ISR。它俩共享一个变量，麻烦就一种——**改一半被打断**。到了 RTOS，争抢的方一下多了：不只 ISR 和某个任务，还有**一堆任务**，全都要碰内核那几本**公共账**——就绪表、延时链、队列的等待名单。这一节，就讲怎么护住这些账。
+
+### 11.1 先复习：裸机怎么护一段代码——关中断
+
+先看那个经典的"改一半被打断"。一句看着人畜无害的 `counter++`，落到机器上其实是**三步**：把 `counter` 读进寄存器 → 加一 → 写回内存。假设 `main` 刚读进旧值 `5`、还没写回，一个 ISR 突然插进来，也把 `counter` 从 `5` 加到 `6` 写了回去；ISR 一走，`main` 接着把它手里那个"`5`+1=`6`"写回去——**两次自增，只涨了一个数**。丢了一次更新。
+
+裸机的老办法很直接：进这段前 `__disable_irq()` 关中断，出来再 `__enable_irq()` 开回去。这一关一开之间的代码，**没人能打断它**，三步一气呵成——这就是**临界区**。RTOS 的临界区，是这招的升级版。
+
+### 11.2 taskENTER_CRITICAL：不是关全部中断，是抬起一条"红线"
+
+你可能以为 `taskENTER_CRITICAL()` 就是"关中断"。在 Cortex-M 上它更精巧。顺着源码看：`portENTER_CRITICAL()` → `vPortEnterCritical()`（[port.c:475](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c#L475)），而它所谓的"关中断"，其实是 `vPortRaiseBASEPRI()`——**把 `BASEPRI` 寄存器抬到 `configMAX_SYSCALL_INTERRUPT_PRIORITY` 这条线**。
+
+这条线的含义是：**只屏蔽"优先级不高于它、可能来调用内核 API"的中断**；比这条线更急的中断，照样能抢进来（它们被约定绝不碰内核，下一节细说）。所以临界区**不是把 CPU 变聋**，而是"暂时挡住会来搅局的那批中断，最急的照放"——既保住了原子性，又没把关键中断的延迟拖垮。这跟 §6.4.2 里 PendSV 挑人前后那两句 `BASEPRI`，是**同一招**。
+
+还有个讲究：它**可嵌套**。`uxCriticalNesting`（[port.c:161](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c#L161)）记着进出层数，进 `+1`、出 `-1`，**减到 0 才真正放开**。这样"临界区里再套临界区"就不会提前解锁——函数 A 护着一段、里头调了同样上临界区的函数 B，B 退出时只会把计数从 2 减到 1，不会把 A 的保护也一起撤掉。
+
+用法就两条铁律：临界区里的代码要**极短**；而且**绝不能调用会阻塞的 API**——关着中断还让出 CPU，等于把系统焊死。
+
+### 11.3 更轻的一招 vTaskSuspendAll：只停调度器，不碰中断
+
+抬 `BASEPRI` 毕竟连累了一批中断的延迟。可有时候你要护的账，**只有别的任务会碰、ISR 根本不碰**（比如从头到尾遍历一遍任务列表）。为这点事去挡中断，太亏了。
+
+于是有更轻的一招：`vTaskSuspendAll()`（[tasks.c:3848](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L3848)）——它**一根中断都不碰**，只把 `uxSchedulerSuspended` 加一（[tasks.c:3886](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L3886)），等于挂出一块牌子："这段时间，别做任务切换。"于是别的任务插不进来，**可中断照常响应、照常跑**。护完了 `xTaskResumeAll()` 把牌子摘掉。
+
+这块牌子，正好解开前面埋的两处伏笔：§5.3 调度骨架开头那句"如果调度器被挂起，就只记个 pending 不真切"、§7 `xTaskIncrementTick` 进门先看的那一眼——问的都是这块 `uxSchedulerSuspended` 牌子。挂起期间到的 tick 不会丢，而是**记账攒着**（pended ticks），等 `xTaskResumeAll` 时一次性补上。代价同样是这段要短——挂着牌子时任务不切换。
+
+| 护什么账 | 用哪招 | 挡住谁 | 中断还响吗 |
+| --- | --- | --- | --- |
+| ISR 和任务都会碰 | `taskENTER_CRITICAL`（抬 BASEPRI） | 红线内的中断 + 所有任务切换 | 红线外的照响 |
+| 只有任务会碰 | `vTaskSuspendAll` | 只挡任务切换 | **全都照响** |
+
+临界区解决了"大家怎么安全地碰同一本账"。可上面反复提到那条**红线 `configMAX_SYSCALL_INTERRUPT_PRIORITY`**——它到底立的是什么规矩？说白了：**中断里，到底能不能直接调用队列、信号量那些 API？** 这正是下一节要讲的：中断和 RTOS，怎么打交道。
 
 ## 12 中断里的 RTOS：FromISR 与立刻换班
 

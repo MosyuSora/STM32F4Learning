@@ -57,6 +57,12 @@ uxNumberOfItems
 # --- scheduler / tick / delay ---
 vTaskStartScheduler
 vTaskSwitchContext
+vTaskSuspendAll
+xTaskResumeAll
+uxSchedulerSuspended
+uxCriticalNesting
+vPortEnterCritical
+vPortRaiseBASEPRI
 pxReadyTasksLists
 uxTopReadyPriority
 vTaskDelay
