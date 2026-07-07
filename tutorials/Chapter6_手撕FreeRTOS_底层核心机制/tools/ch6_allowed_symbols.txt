@@ -125,6 +125,13 @@ pvPortMalloc
 vPortFree
 prvHeapInit
 prvInsertBlockIntoFreeList
+pxNextFreeBlock
+xBlockSize
+xStart
+pxEnd
+vTaskDelete
+xPortGetFreeHeapSize
+xPortGetMinimumEverFreeHeapSize
 xFreeBytesRemaining
 xMinimumEverFreeBytesRemaining
 BlockLink_t

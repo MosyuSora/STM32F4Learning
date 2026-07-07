@@ -1444,7 +1444,112 @@ static configSTACK_DEPTH_TYPE prvTaskCheckFreeStackSpace( const uint8_t *pucStac
 
 ## 14 heap_4：动态对象的 RAM 管家
 
-> （待写）空闲块链表按地址排序、首次适配 pvPortMalloc、相邻块合并防碎片、块头 + 最高位标记。
+§13 里，栈是每个工人**创建时就分好、专属自己**的一块地。可 `xQueueCreate`、`xSemaphoreCreateMutex` 这些**运行中现造**的对象，它们的 RAM 是当场"申请"来的——**找谁申请？** FreeRTOS 里，`pvPortMalloc` / `vPortFree` 就是管这块公共地的**地主**：你要建对象就找它划一块地，删对象就把地还回去。
+
+不过这地主有**好几种脾气**，脾气还差得远——得先认清它们，再说为什么大家默认用第 4 种。
+
+### 14.1 五个地主，脾气各不同
+
+FreeRTOS 在 `portable/MemMang/` 下给了**五份** `pvPortMalloc` 实现（`heap_1.c` … `heap_5.c`），编译时挑**一份**链进去。一张表先摆开：
+
+| 实现 | 能还地(free)？ | 找地策略 | 合并碎片？ | 典型场合 |
+| --- | --- | --- | --- | --- |
+| **heap_1** | ✗ 只分不还 | — | — | 全程只创建、**绝不删**任何对象——最确定、代码最小 |
+| **heap_2** | ✓ | 最佳适配 best-fit | ✗ 不合并 | 已**弃用**：不合并→碎片，官方叫你改用 heap_4 |
+| **heap_3** | ✓ | 包了标准 `malloc/free` | 交给 libc | 想用编译器自带堆、又不在乎实时确定性 |
+| **heap_4** | ✓ | 首次适配 first-fit | ✓ **相邻块合并** | **通用默认**：能删、抗碎片、一块连续 RAM |
+| **heap_5** | ✓ | 同 heap_4 | ✓ | RAM 分散在**几块不连续**地址段时（heap_4 + 跨区） |
+
+### 14.2 为什么一般就用 heap_4
+
+把另外四个一个个排除，就知道 heap_4 为什么是"甜点"了：
+
+- **heap_1 不能还地**——只配那种"开机建好一切、之后永不删"的系统。一旦你要 `vTaskDelete` 或删个队列，它就抓瞎。
+- **heap_2 能还、却不合并**——反复分了还、还了分，空闲地被切得七零八落：**加起来明明够大，却没有一块连续的大地**。这就是碎片，官方已把它标为弃用。
+- **heap_3 借的是 libc 的 `malloc`**——行为不确定（耗时飘）、还得链接器留好堆，嵌入式实时系统不爱。
+- **heap_5 是 heap_4 的跨区版**——只有当你的 RAM 真的**断成好几段地址**时才需要，否则白白多一层配置。
+- **heap_4 刚好卡在正中间**：能自由分/还、**相邻空闲块自动合并压制碎片**、一整块连续地够用、耗时也可控。所以——**没有特殊理由，默认就它。**
+
+### 14.3 回到 heap_4.c：一块地怎么分、怎么还、怎么合
+
+#### 14.3.1 每块地钉一块牌：BlockLink_t，最高位当"已占"旗
+
+heap_4 把整块大地切成若干小块，**空闲的那些串成一条链**（又是链表——和 §3 一个套路）。每块地边上钉块牌 `BlockLink_t`（[heap_4.c:100](../../reference/rtos_src/FreeRTOS-Kernel/portable/MemMang/heap_4.c#L100)）：
+
+```c
+typedef struct A_BLOCK_LINK {
+    struct A_BLOCK_LINK *pxNextFreeBlock;   /* 下一块空闲地在哪 */
+    size_t               xBlockSize;        /* 这块多大（外加：最高位当"已占用"旗）*/
+} BlockLink_t;
+
+#define heapBLOCK_ALLOCATED_BITMASK   ( 1 << (最高位) )   /* xBlockSize 的最高位 */
+```
+
+一个精打细算的小机关：块大小 `xBlockSize` 用不到最高那一位，于是 heap_4 **拿这一位当"这块地已被占用"的旗**——省下一整个字段，一位搞定。链的两头是 `xStart` / `pxEnd` 两个哨兵（和 §3 那个"永远排最后的假人"同一招）。
+
+#### 14.3.2 分地 pvPortMalloc：首次适配，富余就切一块
+
+要地时，`pvPortMalloc`（[heap_4.c:173](../../reference/rtos_src/FreeRTOS-Kernel/portable/MemMang/heap_4.c#L173)）沿空闲链从头走，**遇到第一块够大的就停**（这就是"首次适配"first-fit）：
+
+```c
+pxPreviousBlock = &xStart;
+pxBlock = xStart.pxNextFreeBlock;
+while( ( pxBlock->xBlockSize < xWantedSize ) && ( pxBlock->pxNextFreeBlock != NULL ) )
+{                                                    /* 太小就往下找 */
+    pxPreviousBlock = pxBlock;
+    pxBlock = pxBlock->pxNextFreeBlock;
+}
+if( pxBlock != pxEnd ) {                             /* 找到一块够大的 */
+    pvReturn = ( uint8_t * ) pxBlock + xHeapStructSize;         /* 跳过牌子，把地给你 */
+    pxPreviousBlock->pxNextFreeBlock = pxBlock->pxNextFreeBlock; /* 从空闲链摘掉 */
+
+    if( ( pxBlock->xBlockSize - xWantedSize ) > heapMINIMUM_BLOCK_SIZE ) {   /* 富余太多 → 切两块 */
+        pxNewBlockLink = ( void * )( ( uint8_t * ) pxBlock + xWantedSize );
+        pxNewBlockLink->xBlockSize = pxBlock->xBlockSize - xWantedSize;      /* 后半：剩的 */
+        pxBlock->xBlockSize = xWantedSize;                                   /* 前半：给你的 */
+        /* 把切剩的后半，插回空闲链 */
+        pxNewBlockLink->pxNextFreeBlock = pxPreviousBlock->pxNextFreeBlock;
+        pxPreviousBlock->pxNextFreeBlock = pxNewBlockLink;
+    }
+    xFreeBytesRemaining -= pxBlock->xBlockSize;
+}
+```
+
+拿到一块比你要的大不少的地，它不整块塞给你（那太浪费），而是**切成两半：前半按需给你，后半剩的插回空闲链**继续待命。
+
+#### 14.3.3 还地 + 合并 prvInsertBlockIntoFreeList：抗碎片的命根子
+
+`vPortFree` 把地标回空闲，真正的精华在它调的 `prvInsertBlockIntoFreeList`（[heap_4.c:504](../../reference/rtos_src/FreeRTOS-Kernel/portable/MemMang/heap_4.c#L504)）。**它的空闲链是按"地址"从小到大排的**——这一点是关键，因为**只有按地址排，才能一眼看出左右邻居是不是紧挨着自己**：
+
+```c
+/* 按地址走到该插的位置 */
+for( pxIterator = &xStart; pxIterator->pxNextFreeBlock < pxBlockToInsert;
+     pxIterator = pxIterator->pxNextFreeBlock ) { }
+
+/* ① 和"前一块"首尾相连？→ 并成一块 */
+if( ( uint8_t * ) pxIterator + pxIterator->xBlockSize == ( uint8_t * ) pxBlockToInsert ) {
+    pxIterator->xBlockSize += pxBlockToInsert->xBlockSize;
+    pxBlockToInsert = pxIterator;
+}
+/* ② 和"后一块"首尾相连？→ 再吞并一块 */
+if( ( uint8_t * ) pxBlockToInsert + pxBlockToInsert->xBlockSize
+        == ( uint8_t * ) pxIterator->pxNextFreeBlock ) {
+    pxBlockToInsert->xBlockSize += pxIterator->pxNextFreeBlock->xBlockSize;
+    pxBlockToInsert->pxNextFreeBlock = pxIterator->pxNextFreeBlock->pxNextFreeBlock;
+}
+```
+
+还回来一块地，它左看看、右看看：**前邻居若紧挨着，两块并一块；后邻居若也紧挨着，再吞一块。** 于是零碎的相邻空闲地会**自动长回大块**——这，正是 heap_4 比"能还却不合并"的 heap_2 强的地方，也是 §14.2 说它"抗碎片"的全部底气。
+
+（顺带一个对照：这条空闲链**按地址排**，为的是合并；而 §3 就绪/延时链**按 `xItemValue` 排**，为的是"最早到点的在队头"。同一套链表 + 哨兵，排序键一换，各干各的活。）
+
+### 14.4 剩多少、最惨剩过多少：两个水位
+
+地主还留着两个数：`xFreeBytesRemaining`（当前总共还剩多少空闲字节）、`xMinimumEverFreeBytesRemaining`（**历史上最少的时候剩过多少**——和 §13 栈的高水位一个思路）。`xPortGetFreeHeapSize()` / `xPortGetMinimumEverFreeHeapSize()` 读的就是它俩。
+
+但有一句判断得记死：**"总剩余够、却分不出一块来" = 碎片。** 光看 `xFreeBytesRemaining` 会被骗——它说还剩 2 KB，可要是这 2 KB 碎成十几小块、没一块连续到 500 字节，你要 500 字节照样失败。所以判内存够不够，得同时看"**总剩余**"和"**最大连续块**"。heap_4 的合并已经把碎片压到很小，但极端的分/还模式下仍可能碎——这也是为什么内存要**长期盯着这两个水位**。
+
+对象从哪来——栈（§13）和堆（§14），到此都清楚了。那么把整条线收个尾：一个任务从被创建、上台、等待、协作、到最后被删，这一整趟"活法"，该合到一张图上看看了。这就是下一 PART 的**全景**。
 
 ## PART5 收束与落地
 
