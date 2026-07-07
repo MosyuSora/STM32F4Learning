@@ -893,26 +893,48 @@ COMM send 12 -> count=2
 
 ![队列的数据区与两侧等待者](img/fig-004.png)
 
-### 8.4 回到 queue.c：send / receive 各干两件事
+### 8.4 回到 queue.c：一条传送带的真身
 
-带着 demo 那两个场景读源码就不会晕：空带子上消费者等、生产者一放就唤醒它；满带子上生产者等、消费者一取就唤醒它。
+`v9` 那条带子，落到源码就是 `Queue_t`。手撕开，它凭什么"既缓存数据、又管人"，就全明白了。
 
-| 环节 | 源码入口 | 干的活 |
-| --- | --- | --- |
-| 放件（可能满） | [`xQueueGenericSend()` `L949`](../../reference/rtos_src/FreeRTOS-Kernel/queue.c#L949) | 有空格就拷进去，满了就把自己挂进等料区 |
-| 取件（可能空） | [`xQueueReceive()` `L1509`](../../reference/rtos_src/FreeRTOS-Kernel/queue.c#L1509) | 有货就拷出来，空了就把自己挂进等料区 |
-| 真把数据搬进带子 | [`prvCopyDataToQueue()` `L2393`](../../reference/rtos_src/FreeRTOS-Kernel/queue.c#L2393) | 队列不是只改 count，数据要真拷进缓冲区 |
-| 真把数据搬出带子 | [`prvCopyDataFromQueue()` `L2476`](../../reference/rtos_src/FreeRTOS-Kernel/queue.c#L2476) | 取走一件、腾出空格 |
-| 叫醒另一头 | [`uxListRemove()` `L217`](../../reference/rtos_src/FreeRTOS-Kernel/list.c#L217) | 把等料区里那位摘出来，送回候场区 |
+#### 8.4.1 Queue_t 里装了什么
+
+遮掉选配字段，`Queue_t`（[queue.c:103](../../reference/rtos_src/FreeRTOS-Kernel/queue.c#L103)）的主干正好是"一条会叫人的带子"：
+
+```c
+typedef struct QueueDefinition {
+    int8_t     *pcHead;                  /* 带子仓库的起点 */
+    int8_t     *pcWriteTo;               /* 下一件放哪儿（写指针） */
+    union { QueuePointers_t xQueue;      /* 当队列用时的数据 */
+            SemaphoreData_t xSemaphore;  /* 当信号量/锁用时的数据 */ } u;
+    List_t      xTasksWaitingToSend;     /* 等空位的发送者（按优先级排） */
+    List_t      xTasksWaitingToReceive;  /* 等数据的接收者（按优先级排） */
+    UBaseType_t uxMessagesWaiting;       /* 现在带上有几件 */
+    UBaseType_t uxLength;                 /* 一共几格（容量，按"件"算不是字节） */
+    UBaseType_t uxItemSize;               /* 每件多大（字节） */
+    /* …… cRxLock/cTxLock 等选配字段 …… */
+} Queue_t;
+```
+
+一眼就看到 §8.2 那句"它还管人"的真身——**两条独立的等待名单**：`xTasksWaitingToSend` 挂"等空位的发送者"，`xTasksWaitingToReceive` 挂"等数据的接收者"，而且都**按优先级排**（所以唤醒时叫醒的是最急的那个）。至于那个 `union{xQueue, xSemaphore}`——**同一副骨架，既能当队列、又能当信号量/锁**。这就是下一节"锁为什么住在 `queue.c`"的伏笔。
+
+#### 8.4.2 环形缓冲：写指针走到头，就绕回起点
+
+带子的格子是**一圈**接起来的。每 `send` 一件，`prvCopyDataToQueue`（[queue.c:2393](../../reference/rtos_src/FreeRTOS-Kernel/queue.c#L2393)）把数据拷到 `pcWriteTo`，写指针往前挪 `uxItemSize` 个字节；一旦挪到仓库末尾（`pcTail`），就**绕回起点 `pcHead`**。取件那头同理。为什么绕成一圈？——这样**放/取都不用挪动已有元素、也不用扩容**，永远是 O(1)：来一件写一格、走一件读一格，指针转圈跑就是了。
+
+#### 8.4.3 为什么"按值拷贝"，不传指针
+
+结构体注释里专门写了一句设计原则：**"Items are queued by copy, not reference."**（按值拷贝，不按引用。）`prvCopyDataToQueue` 是实打实把数据 `memcpy` **进队列自己的仓库**，而不是记一个指向发送方变量的指针。
+
+图什么？——这样 COMM `send` 完，它那个局部变量**立刻能销毁、能复用**，队列早把内容抄了一份进自己家。要是传指针，COMM 就得保证那块数据一直活着、还得防两头同时改——又绕回 §8.1 那块"公共黑板"的老毛病了。**按值拷贝，一手交钱一手交货，两头彻底解耦。**（代价是大对象拷贝有成本，所以传大数据时人们才改传指针——但那时，指针指向的生命周期就得自己扛了。）
+
+#### 8.4.4 数据动作和调度动作，在这里接上头
+
+现在两条线合起来看就顺了。`xQueueGenericSend`（[queue.c:949](../../reference/rtos_src/FreeRTOS-Kernel/queue.c#L949)）拷完数据，会扭头看一眼 `xTasksWaitingToReceive`：**非空，就摘下队头那个最急的接收者、送回候场区，并请求一次换班。** 反过来，`xQueueReceive`（[queue.c:1509](../../reference/rtos_src/FreeRTOS-Kernel/queue.c#L1509)）取走一件、腾出空位后，也会去 `xTasksWaitingToSend` 叫醒最急的发送者。
 
 ![队列的数据线与任务线](img/fig-035-queue-data-task-lines.png)
 
-一句话收束这一层：**`xQueueGenericSend()` 不只是"把字节拷进去"，它还可能把接收方从等料区拎回候场；`xQueueReceive()` 也不只是"把字节取出来"，它还可能叫醒等空位的发送方。** 数据动作和调度动作在这里接上了头——这正是队列配叫"任务协作对象"、而不只是"线程安全数组"的原因。
-
-排查队列，也要**两类证据一起采**：`count`（水位）说明容量压力，`waits`（谁挂在等料区）说明任务卡在哪。两样合看才判得准——问题到底是**生产太快、消费太慢，还是被唤醒后没及时上台**。这里还有两条容易踩的坑：
-
-- **容量只吸波峰，治不了长期失衡。** 队列老是满，别本能地把容量往大调——若长期生产速度就是高于消费，再大的带子也终会堵，得回头压生产或提消费。
-- **被叫醒 ≠ 已处理。** COMM 被叫回候场，也只是"有资格上台"，真处理那笔数据，还得等派活和换班（§5、§6 的老规矩，又一次）。
+**所以 `send` 从来不只是"拷字节"，它同时可能把一个任务从等料区拎回候场；`receive` 也一样。** 数据动作和调度动作在这里咬合——这正是队列配叫"任务协作对象"、而非"线程安全数组"的原因。（也顺带记住两条边界：容量只吸波峰，长期生产快于消费仍会堵；被叫回候场也只是"有资格"，真上台还得经 §5 派活、§6 换班。）
 
 数据这条线走通了，可四个人还共用着**同一支笔**——那唯一一路 UART。LOG 正低头写着长长的流水账，COMM 突然有急事也要用它，**这支笔到底归谁、会不会俩人抢着打架？** 下一节的互斥锁，管的就是这个。
 
