@@ -1557,7 +1557,120 @@ if( ( uint8_t * ) pxBlockToInsert + pxBlockToInsert->xBlockSize
 
 ## 15 全景：任务的一生
 
-> （待写）ready / blocked / delayed + 挂起 + 删除全状态；空闲任务 Idle 怎样在没人跑时占位、并回收被删任务的栈和 TCB。
+前面十四节，我们是"一台机器一台机器"地拆的：TCB 是档案袋、就绪链是账本、PendSV 管换台、队列/信号量/锁管协作、临界区管上锁、栈和堆管内存。拆到这儿，该退一步、把镜头拉远了——**一个任务从被造出来到被抹掉，中间到底会在哪几种"活法"之间来回跳？** 这一节不引入任何新机制，只做一件事：把散落各节的状态，收进一张图。
+
+### 15.1 五种活法：任务在工头眼里的五种身份
+
+还是那个车间。工头（调度器）手里管着四个工人，但**任何一个工人，在任一时刻，只会处于下面五种身份之一**——而且我们已经全都见过了，只是从没并排摆一块儿：
+
+| 身份（状态） | 工头视角 | 记在哪张表（§3 的账本） | 谁把它弄成这样 |
+| --- | --- | --- | --- |
+| **运行 Running** | 正站在工作台前干活 | `pxCurrentTCB` 指着它 | 工头点它上台（§6） |
+| **就绪 Ready** | 活儿备齐、就等叫号 | `pxReadyTasksLists[优先级]` | 创建完 / 等到了 / 被唤醒 |
+| **阻塞 Blocked** | 在等一个"条件"——等钟点或等资源 | `pxDelayedTaskList` + 某个事件等待链 | `vTaskDelay`、拿不到的 `xQueueReceive`… |
+| **挂起 Suspended** | 被无条件按停，工头当它不存在 | `xSuspendedTaskList` | 别人喊了 `vTaskSuspend` |
+| **删除 Deleted** | 已经判了死刑、等收尸 | `xTasksWaitingTermination` | 有人喊了 `vTaskDelete` |
+
+> **一个任务的"状态"，本质就是"它此刻被挂在内核哪张链表上"。** §3 我们说链表是任务的"位置地图"，现在这句话有了最完整的含义——换一张表，就是换一种活法。`eTaskGetState()`（[tasks.c L2519](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L2519)）判断任务状态的办法，干脆就是**挨个问"它的 `xStateListItem` 挂在哪张链表的 `pxContainer` 上"**——挂在挂起链就返回 `eSuspended`，挂在终止链就返回 `eDeleted`。状态不是 TCB 里存的一个枚举字段，而是"人在哪张表里"这个事实本身。
+
+### 15.2 一张图看全：状态之间怎么跳
+
+把五种身份和它们之间的跳转画出来，就是任务的一生：
+
+```mermaid
+stateDiagram-v2
+    [*] --> 就绪: xTaskCreate 造好，挂进就绪链
+    就绪 --> 运行: 工头点它上台（§5/§6）
+    运行 --> 就绪: 被同/更高优先级抢下台
+    运行 --> 阻塞: vTaskDelay / 拿不到队列信号量（§7/§8）
+    阻塞 --> 就绪: 到点 or 资源就位，被唤醒（§7）
+    运行 --> 挂起: vTaskSuspend
+    就绪 --> 挂起: vTaskSuspend
+    阻塞 --> 挂起: vTaskSuspend
+    挂起 --> 就绪: vTaskResume
+    运行 --> 删除: vTaskDelete(NULL) 自杀
+    就绪 --> 删除: vTaskDelete(其它任务)
+    阻塞 --> 删除: vTaskDelete
+    挂起 --> 删除: vTaskDelete
+    删除 --> [*]: Idle 任务收尸，释放栈+TCB
+```
+
+图里有三件事值得停下来说清楚——正好是初学者最容易混的三处。
+
+### 15.3 阻塞 vs 挂起：都是"下台"，差在有没有"回来的条件"
+
+这两个状态长得像——都不在就绪链、工头都不会点它上台。但它们是**两种完全不同的下台**：
+
+- **阻塞（Blocked）是"带着条件等"**：`vTaskDelay(100)` 是等到第 100 个 tick、`xQueueReceive` 是等队列里来数据。这个条件被内核**记在册**——延时挂在 `pxDelayedTaskList`（按醒来时刻排序，§7），等资源挂在队列的等待链（§8）。**条件一满足，内核自动把它拎回就绪**，不需要任何人操心。这正是 §7 那句"**RTOS 的等待，是被登记在册的一种状态**"。
+- **挂起（Suspended）是"无条件按停"**：`vTaskSuspend` 不带任何条件，任务进了 `xSuspendedTaskList` 就**再没有任何自动事件能把它捞出来**——哪怕它等的队列来了数据、哪怕它 delay 的时刻早过了，工头都当它不存在。**只有另一个任务显式喊 `vTaskResume`，它才回到就绪。**
+
+一句话记死：**阻塞是"我等一个会到来的东西"，挂起是"我被拔了电，得别人来合闸"。** 前者内核替你盯着，后者内核撒手不管。
+
+### 15.4 删除与收尸：为什么一个任务不能痛快地删掉自己
+
+`vTaskDelete` 最反直觉的一点是：**任务往往不能当场把自己删干净。** 想想就明白了——一个任务正站在**它自己的那块栈**上运行（§13），你让它此刻就把这块栈和自己的 TCB 用 `vPortFree` 还给堆？那它脚下的地就被抽了，函数都返回不回去。**人不能一边站在木板上，一边锯断这块木板。**
+
+FreeRTOS 的解法很干脆——**删自己，只做一半，剩下一半交给一个永远闲着的任务去做。** 看 `vTaskDelete` 删的若是"正在运行的任务自己"这条路（[tasks.c L2273](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L2273)）：
+
+```c
+/* 删的是正在运行的任务：不能立刻释放它的栈和 TCB，
+ * 先把它挂进"待终止链"，让空闲任务事后来收。 */
+vListInsertEnd( &xTasksWaitingTermination, &( pxTCB->xStateListItem ) );
+
+/* 记一笔：有一个任务待清理，空闲任务据此知道该去翻这张链。 */
+++uxDeletedTasksWaitingCleanUp;
+```
+
+它没有 `vPortFree`，只是把这个将死的任务**换了张链表挂着**（还是那句：换状态 = 换链表），并给一个计数器 `uxDeletedTasksWaitingCleanUp` 加一，当作留给收尸人的便条。真正的释放，发生在**空闲任务（Idle Task）**里。
+
+这个空闲任务是 `vTaskStartScheduler` 时**自动**给你创建的、优先级最低（`tskIDLE_PRIORITY` = 0）的兜底任务——它存在的意义之一，就是"没别人可跑时 CPU 也得有活干"。而它循环体里第一件事，就是收尸（[tasks.c L5833](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L5833)）：
+
+```c
+static portTASK_FUNCTION( prvIdleTask, pvParameters )
+{
+    for( ; ; )
+    {
+        /* 看看有没有任务把自己删了——有的话，
+         * 空闲任务负责释放它的 TCB 和栈。 */
+        prvCheckTasksWaitingTermination();
+        /* ……后面还有低功耗 tickless 等钩子，略 */
+    }
+}
+```
+
+`prvCheckTasksWaitingTermination`（[tasks.c L6110](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L6110)）就是那个收尸的人：只要便条计数还大于 0，就从待终止链摘下一个，把栈和 TCB 真正还给堆——
+
+```c
+while( uxDeletedTasksWaitingCleanUp > ( UBaseType_t ) 0U )
+{
+    taskENTER_CRITICAL();
+    {
+        pxTCB = listGET_OWNER_OF_HEAD_ENTRY( ( &xTasksWaitingTermination ) );
+        ( void ) uxListRemove( &( pxTCB->xStateListItem ) );  /* 摘下 */
+        --uxCurrentNumberOfTasks;
+        --uxDeletedTasksWaitingCleanUp;
+    }
+    taskEXIT_CRITICAL();
+
+    prvDeleteTCB( pxTCB );   /* 这里才真正 vPortFree 栈和 TCB */
+}
+```
+
+于是整条链串起来了：`vTaskDelete` 判死刑、挂进终止链、记一笔 → 任务被换下台后不再运行 → 空闲任务某次轮到它跑，翻出终止链、把栈和 TCB 还给 heap_4（§14）。**这就是为什么删一个任务后，堆空间不是"立刻"回来，而是"等空闲任务跑一趟"才回来**——你若删完立刻 `xPortGetFreeHeapSize()`，很可能一点没涨，得等 CPU 空下来让 Idle 收完尸才涨。
+
+> 补一句对称的：如果你删的是**别的**任务（不是自己），那任务没站在自己栈上，`vTaskDelete` 就地 `prvDeleteTCB` 直接释放，用不着劳烦空闲任务。**只有"自杀"才需要收尸人**——因为没人能亲手拆掉自己脚下的地。
+
+### 15.5 把一生连起来读
+
+现在回看 §15.2 那张图，它其实就是本章前十四节的一条总索引：
+
+- **造出来**（§4）→ 进就绪链，等工头点名；
+- **上台/下台**（§5、§6）→ 在运行↔就绪之间被 PendSV 搬来搬去；
+- **主动等**（§7、§8、§9、§10）→ 掉进阻塞，条件满足再被拎回；
+- **被按停/放行**（`vTaskSuspend`/`vTaskResume`）→ 进出挂起；
+- **被抹掉**（`vTaskDelete` + Idle）→ 挂进终止链，等空闲任务把栈和堆还回去。
+
+**任务的"一生"，就是它的 `xStateListItem` 在这几张内核链表之间搬家的一生。** 想通了这句，第六章最核心的世界观就立住了：FreeRTOS 调度的全部戏法，归根结底是**一组链表 + 一个哨兵 + 一次 PendSV**。下一节，我们拿一条真实的项目日志，把这套戏法完整地走一遍。
 
 ## 16 项目演练：一条日志串起全部机制
 
