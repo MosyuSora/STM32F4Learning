@@ -135,3 +135,22 @@ xPortGetMinimumEverFreeHeapSize
 xFreeBytesRemaining
 xMinimumEverFreeBytesRemaining
 BlockLink_t
+
+# --- lifecycle: suspend / delete / idle reclaim (§15) ---
+eTaskGetState
+eTaskState
+eRunning
+eReady
+eBlocked
+eSuspended
+eDeleted
+vTaskSuspend
+vTaskResume
+xSuspendedTaskList
+xTasksWaitingTermination
+uxDeletedTasksWaitingCleanUp
+prvCheckTasksWaitingTermination
+prvDeleteTCB
+prvIdleTask
+tskIDLE_PRIORITY
+listGET_OWNER_OF_HEAD_ENTRY
