@@ -91,6 +91,10 @@ prvInitialiseMutex
 xQueueSemaphoreTake
 xSemaphoreCreateMutex
 pxMutexHolder
+xMutexHolder
+uxRecursiveCallCount
+xSemaphore
+prvAddTaskToReadyList
 
 # --- heap_4 ---
 pvPortMalloc
