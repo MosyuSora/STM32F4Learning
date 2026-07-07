@@ -1078,9 +1078,13 @@ if( pxQueue->pcWriteTo >= pxQueue->u.xQueue.pcTail )               /* 到仓库�
 
 ### 9.3 回到 queue.c：为什么信号量"不搬数据、只改一个数"
 
+#### 9.3.1 信号量 = 每件 0 字节的队列
+
 信号量的源码，你几乎不用重新读——**它就是 §8 那套队列，跑在 `uxItemSize == 0` 这条特例上**。
 
 `xSemaphoreCreateBinary`、`xQueueCreateCountingSemaphore`（[queue.c:912](../../reference/rtos_src/FreeRTOS-Kernel/queue.c#L912)）说穿了，都是拿队列的创建函数、把**每件大小设成 0**（§8 开头那个 `queueSEMAPHORE_QUEUE_ITEM_LENGTH` 就是 0）造出来的。`give` 走的还是 `xQueueGenericSend`，`take` 走的还是 `xQueueSemaphoreTake`——全是 §8/§10 见过的同一批函数。
+
+#### 9.3.2 那条"不搬数据"的分支
 
 关键就在"每件 0 字节"这一下。`prvCopyDataToQueue`（[queue.c:2404](../../reference/rtos_src/FreeRTOS-Kernel/queue.c#L2404)）开头就分岔：
 
@@ -1097,6 +1101,8 @@ else if( xPosition == queueSEND_TO_BACK ) {
 **`uxItemSize == 0` 这条分支里，连一个 `memcpy` 都没有**——数据搬运整个省了，`send`/`receive` 就退化成把 `uxMessagesWaiting` 加一 / 减一。所以"发信号"＝"计数 +1"、"等信号"＝"等计数 > 0"，只剩一个数在动。（还顺手看见：这条分支里若是 mutex，`give` 时会做**优先级复原**——那正是 §10 那把"带主人的信号量"比普通信号量多出来的活。）
 
 而满/空/挂等待链/按优先级唤醒——这套机器，信号量**原封不动白捡** §8 的：等信号的任务照样挂在 `xTasksWaitingToReceive`，`give` 一下照样把里头最急的那个拎回候场。
+
+#### 9.3.3 队列 / 信号量 / 互斥锁：同一副骨架，三种用法
 
 于是三样东西，在你眼前收成了同一副骨架的三种用法：
 
@@ -1223,7 +1229,9 @@ if( pxMutexHolderTCB->uxPriority < pxCurrentTCB->uxPriority ) {   /* owner 比�
 
 而会来插手的，就开头那**两拨人**：① **门外闯进来的急件**（中断）；② **被挂钟叫来接班、顶上台的另一个工人**（任务切换）。FreeRTOS 对付它俩，给了两招——**一招闩门，一招喊话**，区别只在挡谁。
 
-### 11.2 头一招·闩门：门一闩，急件和钟声全挡在外
+### 11.2 回到源码：两把锁的真身，一把一把拆
+
+#### 11.2.1 头一招·闩门：门一闩，急件全挡在外
 
 头一招最彻底：`taskENTER_CRITICAL()`——**改账前，工头把车间大门"哐当"一闩**。抄真码看它怎么闩（`portENTER_CRITICAL()` → `vPortEnterCritical()`，[port.c:475](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c#L475)）：
 
@@ -1250,11 +1258,13 @@ msr basepri, %0    @ %0 = configMAX_SYSCALL_INTERRUPT_PRIORITY
 
 把那条红线的值写进 `BASEPRI`——CPU 从此把"加急等级不高于红线"的急件全挡门外（Cortex-M 数值越大越不急，挡的是数值 ≥ 红线那批），只有比红线更急的（真·特大火警）才撞得开门。这一条 `msr`，跟 §6.4.2 PendSV 那两句是同一条指令。
 
-**妙就妙在：这一闩，把第 ② 拨人——换班——也一并挡了。凭什么？** 别忘了第 ② 拨是**被挂钟叫来的**：工头听见"当"一声（§7 的 tick 中断）才去换人。**可挂钟那声"当"，本身也是从门外传进来的一记急件呀**——门一闩，急件拍门进不来，**连挂钟的报点声也传不进来了**，工头压根听不到钟点，自然不会去换人。**闩一扇门，两拨人全挡在外——这，才是"临界区连换班也一并停住"的真正道理。**
-
 （另两点：`uxCriticalNesting` 让门能**上好几道闩**、退到 0 道才真开，免得里层函数替外层提前开了门；`configASSERT` 那句提醒——**这道普通门闩不许在急件里插**，急件另有专用通道 §12 的 `FromISR`。）用法两条铁律：门闩着的这几步要**极短**、且**绝不能在闩门时调用会让工人睡过去（阻塞）的 API**——门闩着人却去睡，全车间跟着僵死。
 
-### 11.3 第二招·喊话：门照开，只喊一嗓子"别接班"
+#### 11.2.2 一闩，为什么连"换班"也停了
+
+`taskENTER_CRITICAL` 从头到尾没写一句"禁止换班"，可换班确实也停了——**凭什么？** 别忘了第 ② 拨人是**被挂钟叫来的**：工头听见"当"一声（§7 的 tick 中断）才去换人。**可挂钟那声"当"，本身也是从门外传进来的一记急件呀**——门一闩，急件拍门进不来，**连挂钟的报点声也传不进来了**，工头压根听不到钟点，自然不会去换人。**闩一扇门，两拨人全挡在外——这，才是"临界区连换班也一并停住"的真正道理。**
+
+#### 11.2.3 第二招·喊话：门照开，只喊一嗓子"别接班"
 
 闩门虽狠，却连急件也一并挡了、连累一批中断的延迟。可很多时候，你要护的账**只有别的工人会翻、急件根本不碰**（比如工头从头数一遍花名册）。为这点事把整扇门闩死，太亏。
 
@@ -1271,7 +1281,7 @@ void vTaskSuspendAll( void ) {
 
 它**怎么做到"只停接班、不挡急件"**？——正好和闩门相反：不动大门，只在"**接班**"这个动作上设了道关卡。§5.3 / §7 那两处伏笔就是这道关卡——挂钟照样"当当"响，可 `xTaskIncrementTick` 每 tick 进门先听工头这声喊：喊着"别接班"呢，就**先把这记钟点记账攒着**（pended ticks）、先不换人；等 `xTaskResumeAll` 收话时，攒下的钟点一次补做。于是急件一封封照办，单单"换人上台"被摁住。（代价同样是这声喊要短。）
 
-### 11.4 闩门还是喊话：就看这本账会不会被急件碰
+### 11.3 闩门还是喊话：就看这本账会不会被急件碰
 
 两招怎么选，一句话——**看你要护的这本账，会不会被急件碰**：
 
@@ -1303,7 +1313,7 @@ Ch2 里那个"**数值越小越急**"的反直觉，到这儿才见真章。而�
 
 所以内核给了一整套 **`xxxFromISR`** 版本（`xQueueSendFromISR`、`xSemaphoreGiveFromISR`……），规矩就一条：**永不阻塞**。传送带满了？直接回你个"没塞进去"（`pdFALSE`），绝不把急件摁那儿睡。（也正因如此，FromISR 版**没有"等多久"那个 `xTicksToWait` 参数**——急件压根不许等。）
 
-### 12.3 叫醒了更急的人，退出那一刻立刻换班
+### 12.3 回到源码：叫醒了更急的人，退出那一刻立刻换班
 
 现在把 §9.1 的"叫醒绳"接上。UART 急件拉一下绳（`xQueueSendFromISR` 把料扔上传送带、顺手叫醒等料的 COMM 任务）。可要是被叫醒的 COMM，**比"刚被这封急件打断的那个人"更急**呢？按理该让 COMM **立刻上台**，别傻等到下一记钟点。偏偏急件自己**不能换人**——它得赶紧退出，而换人还得走 PendSV（§6）。
 
@@ -1319,9 +1329,11 @@ void USARTx_IRQHandler( void ) {
 }
 ```
 
-三步逐个对着真码拆：
+① 只是把回执变量先设成 `pdFALSE`，没啥可说；真戏在 ② 和 ③，对着真码拆：
 
-**② 谁把回执写成真的？** 是 `xQueueSendFromISR` 内部——扔完料，它扭头看等料区有没有人，有就叫醒队头，而且那人**若比当前更急**，就在回执上记一笔（[queue.c:1285](../../reference/rtos_src/FreeRTOS-Kernel/queue.c#L1285)）：
+#### 12.3.1 谁把回执写成真的
+
+**②** 是 `xQueueSendFromISR` 内部——扔完料，它扭头看等料区有没有人，有就叫醒队头，而且那人**若比当前更急**，就在回执上记一笔（[queue.c:1285](../../reference/rtos_src/FreeRTOS-Kernel/queue.c#L1285)）：
 
 ```c
 if( listLIST_IS_EMPTY( &pxQueue->xTasksWaitingToReceive ) == pdFALSE )
@@ -1329,7 +1341,9 @@ if( listLIST_IS_EMPTY( &pxQueue->xTasksWaitingToReceive ) == pdFALSE )
         *pxHigherPriorityTaskWoken = pdTRUE;   /* 叫醒的这位更急，记一笔 */
 ```
 
-**③ 这笔回执怎么变成换班？** `portYIELD_FROM_ISR` 展开开来，就是"回执为真，就挂一个 PendSV"（[portmacro.h:114](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/portmacro.h#L114)）：
+#### 12.3.2 这笔回执怎么变成换班
+
+**③** `portYIELD_FROM_ISR` 展开开来，就是"回执为真，就挂一个 PendSV"（[portmacro.h:114](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/portmacro.h#L114)）：
 
 ```c
 #define portYIELD_FROM_ISR( x )       portEND_SWITCHING_ISR( x )
