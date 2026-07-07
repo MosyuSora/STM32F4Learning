@@ -45,6 +45,10 @@ listGET_OWNER_OF_HEAD_ENTRY
 pxNext
 pxPrevious
 pxContainer
+pvOwner
+pxIndex
+xItemValue
+xListEnd
 uxNumberOfItems
 
 # --- scheduler / tick / delay ---
