@@ -63,6 +63,10 @@ vTaskDelay
 vTaskDelayUntil
 xTaskIncrementTick
 xTaskResumeAll
+xTickCount
+xNextTaskUnblockTime
+pxDelayedTaskList
+pxOverflowDelayedTaskList
 prvAddCurrentTaskToDelayedList
 
 # --- queue / semaphore / mutex ---
