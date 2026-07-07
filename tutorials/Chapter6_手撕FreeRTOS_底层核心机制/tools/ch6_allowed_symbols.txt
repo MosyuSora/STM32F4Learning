@@ -38,6 +38,8 @@ List_t
 ListItem_t
 MiniListItem_t
 vListInitialise
+vListInitialiseItem
+uxCurrentNumberOfTasks
 vListInsert
 vListInsertEnd
 uxListRemove
