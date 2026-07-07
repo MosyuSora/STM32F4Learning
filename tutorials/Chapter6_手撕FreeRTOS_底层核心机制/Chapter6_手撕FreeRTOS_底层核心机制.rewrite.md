@@ -1284,9 +1284,64 @@ void vTaskSuspendAll( void ) {
 
 那条红线 `configMAX_SYSCALL_INTERRUPT_PRIORITY`——它到底给中断立了什么规矩、凭什么"红线内的急件才准碰账"？下一节，专讲急件和 RTOS 怎么打交道。
 
-## 12 中断里的 RTOS：FromISR 与立刻换班
+## 12 中断里的 RTOS：急件怎么安全地喊人干活
 
-> （待写）为什么有 xxxFromISR、configMAX_SYSCALL_INTERRUPT_PRIORITY 这条红线、pxHigherPriorityTaskWoken + portYIELD_FROM_ISR 怎样"中断里唤醒任务、退出时立刻换班"。
+§11 里，那条门框上的**红线**反复冒头，还立了句狠规矩——"红线外的急件绝不许碰账"。这条红线到底划的是什么、急件究竟怎么跟 RTOS 打交道，这一节讲透。而它正好是 §9.1 那根"叫醒绳"的**中断那一头**：当初说"中断只管拉绳、把重活甩给任务"，可这根绳在急件里到底怎么安全地拉——答案全在这儿。
+
+### 12.1 门框上那条红线：谁准碰账，谁享"撞门"特权
+
+第 2 章讲过，门口的保安队长 NVIC 会给每封急件盖一个**加急章**（优先级）。工头就着这个加急等级，在门框上画了条**红线**，把急件劈成两拨——这条红线，就是 `configMAX_SYSCALL_INTERRUPT_PRIORITY`：
+
+- **红线以内**（不够急的那拨，Cortex-M 里数值 ≥ 红线）：**准进车间碰账**，但只能走"报备"通道（`xxxFromISR`，见下）。它们的另一个身份，正是 §11.2 那道**门闩拦得住**的急件——**正因为拦得住，工头闩着门改账时它们插不进来，账才护得住。**
+- **红线以外**（比红线更急的，数值 < 红线）：享受**"闩门也拦不住、随到随进"的撞门特权**（给真·特大火警留的最低延迟），代价是——**绝不许碰工头任何一本账**。为什么？因为门闩拦不住它，一旦它去碰账，工头没有任何办法护住，账必乱。
+
+Ch2 里那个"**数值越小越急**"的反直觉，到这儿才见真章。而且它牵出一条铁规矩：**那口挂钟（tick 中断）必须落在红线以内**——否则 §11.2 的"闩门连钟声一起挡"就不成立，工头闩着门也会被钟点戳穿、账就护不住了。（FreeRTOS 源码注释里专门红着脸警告过这条。）
+
+### 12.2 急件不能"等"：所以有一整套 FromISR
+
+再看那个"报备通道"是什么，为什么非它不可。普通的 `xQueueSend`，传送带满了会让发送者**阻塞**——退到等料区睡一觉，等腾出空位再被叫醒（§8）。可这套**在急件里是灾难**：急件**根本不是工人**，它没工位、没柜子、没 TCB，**不能睡、也不能让出工作台**。真让一封急件"阻塞"，就是死锁——它睡死在那儿，而它不是任务，谁也没法把它叫醒。
+
+所以内核给了一整套 **`xxxFromISR`** 版本（`xQueueSendFromISR`、`xSemaphoreGiveFromISR`……），规矩就一条：**永不阻塞**。传送带满了？直接回你个"没塞进去"（`pdFALSE`），绝不把急件摁那儿睡。（也正因如此，FromISR 版**没有"等多久"那个 `xTicksToWait` 参数**——急件压根不许等。）
+
+### 12.3 叫醒了更急的人，退出那一刻立刻换班
+
+现在把 §9.1 的"叫醒绳"接上。UART 急件拉一下绳（`xQueueSendFromISR` 把料扔上传送带、顺手叫醒等料的 COMM 任务）。可要是被叫醒的 COMM，**比"刚被这封急件打断的那个人"更急**呢？按理该让 COMM **立刻上台**，别傻等到下一记钟点。偏偏急件自己**不能换人**——它得赶紧退出，而换人还得走 PendSV（§6）。
+
+FreeRTOS 的解法很巧：让急件在退出前**捎带补一次换班申请**。看那段几乎所有中断都长一个样的标准写法：
+
+```c
+void USARTx_IRQHandler( void ) {
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;   /* ① 先假设：没叫醒更急的 */
+    xQueueSendFromISR( xRxQueue, &byte,              /* ② 拉绳：扔料 + 叫人， */
+                       &xHigherPriorityTaskWoken );  /*    回执写进这个变量 */
+    /* …… 清中断标志 …… */
+    portYIELD_FROM_ISR( xHigherPriorityTaskWoken );  /* ③ 回执是真→退出即换班 */
+}
+```
+
+三步逐个对着真码拆：
+
+**② 谁把回执写成真的？** 是 `xQueueSendFromISR` 内部——扔完料，它扭头看等料区有没有人，有就叫醒队头，而且那人**若比当前更急**，就在回执上记一笔（[queue.c:1285](../../reference/rtos_src/FreeRTOS-Kernel/queue.c#L1285)）：
+
+```c
+if( listLIST_IS_EMPTY( &pxQueue->xTasksWaitingToReceive ) == pdFALSE )
+    if( xTaskRemoveFromEventList( &pxQueue->xTasksWaitingToReceive ) != pdFALSE )
+        *pxHigherPriorityTaskWoken = pdTRUE;   /* 叫醒的这位更急，记一笔 */
+```
+
+**③ 这笔回执怎么变成换班？** `portYIELD_FROM_ISR` 展开开来，就是"回执为真，就挂一个 PendSV"（[portmacro.h:114](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/portmacro.h#L114)）：
+
+```c
+#define portYIELD_FROM_ISR( x )       portEND_SWITCHING_ISR( x )
+#define portEND_SWITCHING_ISR( x )    do { if( x ) portYIELD(); } while( 0 )
+#define portYIELD()   ( portNVIC_INT_CTRL_REG = portNVIC_PENDSVSET_BIT )   /* 挂起 PendSV */
+```
+
+于是链条闭合了：急件一退出，**那封"工头发给自己的急件"——PendSV（§6）立刻接手**，把刚叫醒的 COMM 换上台。**一根叫醒绳（§9.1）、接上一次换班（§6），中间那段"急件里怎么安全地喊人、又不自己去换"，填的正是 `FromISR` + `pxHigherPriorityTaskWoken` + `portYIELD_FROM_ISR` 这套。**
+
+（最后一问：干嘛不在中断里直接换人？因为 §6.4.2 说过，切换**统一收口到 PendSV** 才可控——急件只管记个申请，真换交给优先级最低的 PendSV，等所有嵌套的急件都办完了再切，最稳。）
+
+到这儿，PART3 的中断线就通了：急件闯门、护账的闩门与喊话（§11）、红线 + FromISR + 退出即换班（§12）。任务怎么活、怎么协作、急件怎么安全掺和进来——三条线齐了。可这一路上，任务栈、TCB、队列缓冲、信号量、锁，桩桩都在吃 RAM——**它们到底从哪块地里长出来的？** 下一 PART，就去见这块地的两位管家：**栈**和**堆**。
 
 ## PART4 内存：栈与堆
 
