@@ -20,6 +20,7 @@ xStateListItem
 xEventListItem
 pcTaskName
 pxStack
+xMPUSettings
 uxBasePriority
 listSET_LIST_ITEM_OWNER
 
