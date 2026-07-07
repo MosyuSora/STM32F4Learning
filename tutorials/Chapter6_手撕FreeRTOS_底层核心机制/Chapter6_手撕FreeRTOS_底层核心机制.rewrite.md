@@ -722,9 +722,9 @@ Cortex-M 有个规矩——**只要进异常，硬件会自动把一批寄存器
 
 一句话收束：**FreeRTOS 的 PendSV 不是"保存全部寄存器"，而是补齐硬件没自动存的那另一半现场。** 想通这条，再看那几行 `stmdb`/`ldmia` 就不神秘了。
 
-### 6.4 回到 port.c：一条很规整的搬运线
+### 6.4 回到 port.c：一条搬运线，两次方向反转
 
-把 [`xPortPendSVHandler()` `L504`](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c#L504) 的汇编压成 C 风格骨架，它就是一条规整的搬运线：
+把 [`xPortPendSVHandler()` `L504`](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c#L504) 那段汇编压成 C 骨架，它就是一条规整的搬运线：
 
 ```c
 old_psp = read_psp();                              /* 拿到旧人柜子的钥匙 */
@@ -739,23 +739,31 @@ write_psp(new_psp);
 return_via_exc_return();   /* bx r14：异常返回，硬件自动弹回那半张交接单 */
 ```
 
-盯住**两次方向反转**就抓住全部了：前半段方向是 `CPU → PSP → 旧 TCB`（把旧人现场收进柜子），后半段方向是 `新 TCB → PSP → CPU`（把新人现场倒回台上）。夹在中间的 [`vTaskSwitchContext()` `L5120`](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L5120) **只翻当前任务牌、不搬一个寄存器**——保存和恢复全在端口层。这也正是 §5 那句"**点名≠切过去**"落到汇编上的样子。
+#### 6.4.1 前半段收旧人，后半段发新人
 
-最后那个 `bx r14` 也别当普通函数返回读。此刻 `r14` 里装的是 `EXC_RETURN`，它触发的是**异常返回**：CPU 按这个值回到线程模式、改用新人的 PSP、（若有）连 FPU 现场一起恢复，然后硬件自动把那半张自动交接单弹回寄存器——新人这才真正站上了台。
+盯住**两次方向反转**，整段就拿下了：前半段方向是 `CPU → PSP → 旧 TCB`（把旧人现场收进他柜子），后半段方向是 `新 TCB → PSP → CPU`（把新人现场倒回台上）。中间那一下 `vTaskSwitchContext` 是分水岭。
 
-### 6.5 排查：故障停在 PendSV，不一定是 PendSV 的错
+```mermaid
+flowchart LR
+    subgraph SAVE["① 收旧人：CPU → 柜子"]
+      A1["读 PSP<br/>（旧人钥匙）"] --> A2["手动压 r4-r11"] --> A3["新栈顶<br/>写进旧 TCB"]
+    end
+    A3 --> SW["② vTaskSwitchContext<br/>只翻牌·改 pxCurrentTCB"]
+    SW --> B1
+    subgraph REST["③ 发新人：柜子 → CPU"]
+      B1["从新 TCB<br/>取 PSP"] --> B2["手动弹 r4-r11"] --> B3["写回 PSP<br/>→ bx r14"]
+    end
+```
 
-PendSV 是现场交接的最后一棒，所以它也最容易背黑锅。记住一句：**HardFault 停在 PendSV 附近，只说明"坏现场在这一步被暴露"，不等于"现场是 PendSV 弄坏的"。** 真凶常常更早——栈溢出、TCB 被越界写、错误的中断优先级、在不该调 API 的地方调了 API。
+#### 6.4.2 中间那两句 BASEPRI，是给调度器上的一把锁
 
-所以每当"任务该跑却没跑/切完就崩"，把它拆成三段独立证据，别混：
+`vTaskSwitchContext` 被 `raise_basepri()` / `clear_basepri()` 夹在中间，不是摆设。§5.3 讲过，它要翻位图、点最高桶、推游标、改 `pxCurrentTCB`——碰的全是**调度器和中断共用的那本公共账**（跟 §4.3.3 挂人进就绪表是同一类隐患）。挑人挑到一半，若被一个会调用内核 API 的中断插进来，账就乱了。
 
-| 三段 | 看什么 | 常见错判 |
-| --- | --- | --- |
-| **唤醒了**（wake） | 队列 / Delay / mutex 释放，有没有把它送回候场区 | 以为"该 ready 了就会跑" |
-| **点名了**（selected） | `pxCurrentTCB` 是否真指向它、优先级证据 | 以为"选中了就等于在跑" |
-| **切过去了**（switched） | 旧 PSP、新 PSP 是否各在自己栈范围内，TCB 栈顶是否被覆盖 | 以为"崩在 PendSV 就是 PendSV 写错" |
+`BASEPRI` 就是那把临时锁：它把**优先级不高于 `configMAX_SYSCALL_INTERRUPT_PRIORITY` 的中断**先挡在门外，等点完名再放开。**注意它不是关掉所有中断**——比它更紧急的中断照样能抢进来，只是那些中断被约定"不许碰内核 API"，所以碰不到这本账。这一手，既保住了挑人的原子性，又没为了这点事把最急的中断也一起憋死。
 
-三段一分开，`COMM 响应慢`就不会被粗暴归成"调度有问题"或"PendSV 有问题"，而是顺着 wake → selected → switched 一步步缩小到具体那一棒。
+#### 6.4.3 收尾的 bx r14：不是返回，是"异常返回"
+
+最后那句 `bx r14` 别当普通函数返回读。此刻 `r14` 里装的是 `EXC_RETURN`——一个特殊值，触发的是**异常返回**：CPU 按它回到线程模式、改用新人的 PSP、（若这人用了 FPU）连浮点现场一起恢复，然后**硬件自动**把那半张自动交接单（`r0-r3`/`r12`/`lr`/`pc`/`xPSR`）弹回寄存器。至此，新人才真正站上了台。软件补的那一半、硬件弹的那一半，在这一跳严丝合缝地拼成一整套现场——这正是 §1.3.3 说的"初始栈帧要伪造成被中断打断的样子"最终兑现的地方。
 
 到这儿，一个任务从"是谁"到"在哪块区"、被"点名"、再"真站上台"的整条链就通了。可我们一直默认一件事没深究：**任务凭什么会主动让出工作台去"等"？** LED 说"我要等 50 ms"，这 50 ms 里 CPU 去干嘛了、时间又是谁在数？下一节就看 Delay 与 Tick。
 
