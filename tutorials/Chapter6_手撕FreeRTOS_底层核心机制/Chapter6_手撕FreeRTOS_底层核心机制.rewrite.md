@@ -189,20 +189,27 @@ LED 第一次上台时，口袋空空如也。于是**工头得在它上工前�
 
 #### 1.3.3 pxPortInitialiseStack：照单把口袋一格格压进栈
 
-真正干这活的是 `pxPortInitialiseStack()`（[port.c:202](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c#L202)）。压成伪代码，它就是照着上表把口袋一个个往栈里塞：
+真正干这活的是 `pxPortInitialiseStack()`（[port.c:202](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c#L202)）。它的真身很直白，照着上表把口袋一个个往栈里塞：
 
 ```c
-top--;  *top = xPSR;             /* 213: 状态标志，含 Thumb 位 */
-top--;  *top = task_entry;       /* 215: PC  —— 任务第一条指令 */
-top--;  *top = task_return_trap; /* 217: LR  —— return 就落进陷阱 */
-top -= 5;                        /*      跳过 R12, R3, R2, R1 */
-*top = pvParameters;             /* 221: R0  —— 任务入口第一个参数 */
-top--;  *top = exc_return;
-top -= 8;                        /*      R11…R4 占位 */
-return top;                      /* 230: 新栈顶，交给 TCB 收好 */
+StackType_t *pxPortInitialiseStack( StackType_t *pxTopOfStack,
+                                    TaskFunction_t pxCode, void *pvParameters ) {
+    pxTopOfStack--;
+    *pxTopOfStack = portINITIAL_XPSR;                               /* xPSR：含 Thumb 位 */
+    pxTopOfStack--;
+    *pxTopOfStack = ((StackType_t) pxCode) & portSTART_ADDRESS_MASK;/* PC ：任务入口 */
+    pxTopOfStack--;
+    *pxTopOfStack = (StackType_t) portTASK_RETURN_ADDRESS;          /* LR ：return 陷阱 */
+    pxTopOfStack -= 5;                                              /*      跳过 R12,R3,R2,R1 */
+    *pxTopOfStack = (StackType_t) pvParameters;                    /* R0 ：入口第一个参数 */
+    pxTopOfStack--;
+    *pxTopOfStack = portINITIAL_EXC_RETURN;
+    pxTopOfStack -= 8;                                             /*      R11…R4 占位 */
+    return pxTopOfStack;                                           /* 新栈顶 → 交给 TCB */
+}
 ```
 
-一连串 `top--` 别发怵，它只是**在栈上从高地址往低地址、一格一格往下压**。但这里藏着整段最关键、也最容易被略过的一个"为什么"——**这些口袋的摆放顺序，不是随便定的，而是照着"硬件在中断时会怎样压栈"一比一伪造的**。源码注释原话就是：
+一连串 `pxTopOfStack--` 别发怵，它只是**在栈上从高地址往低地址、一格一格往下压**。但这里藏着整段最关键、也最容易被略过的一个"为什么"——**这些口袋的摆放顺序，不是随便定的，而是照着"硬件在中断时会怎样压栈"一比一伪造的**。源码注释原话就是：
 
 > `Simulate the stack frame as it would be created by a context switch interrupt.`（伪造一个"仿佛刚被上下文切换中断打断"时的栈帧。）
 
@@ -436,25 +443,38 @@ typedef struct xLIST {
 
 #### 3.3.3 挪人：vListInsert 与 uxListRemove 两个动作
 
-有了牌子和区，"挪人"就落到两个函数上。压成骨架：
+有了牌子和区，"挪人"就落到两个函数上。直接抄真身（去掉 trace/断言/整段注释）：
 
 ```c
-/* vListInsert：进某块区（list.c:139）*/
-按 xItemValue 从小到大，找到该插的位置;   /* 走到哨兵必停 */
-把新牌子的 pxNext/pxPrevious 接进链;
-item->pxContainer = list;                  /* 挂正面：我归这块区 */
-list->uxNumberOfItems++;
+void vListInsert( List_t *const pxList, ListItem_t *const pxNewListItem ) {
+    const TickType_t xValueOfInsertion = pxNewListItem->xItemValue;
+    ListItem_t *pxIterator;
+    /* 从哨兵起步往后走，直到"下一个的号"比新来的大——就插在这儿 */
+    for( pxIterator = (ListItem_t *) &pxList->xListEnd;
+         pxIterator->pxNext->xItemValue <= xValueOfInsertion;
+         pxIterator = pxIterator->pxNext ) { /* 空循环，只为找位；哨兵号最大，必停 */ }
+    pxNewListItem->pxNext = pxIterator->pxNext;         /* 四行指针，把新牌子接进链 */
+    pxNewListItem->pxNext->pxPrevious = pxNewListItem;
+    pxNewListItem->pxPrevious = pxIterator;
+    pxIterator->pxNext = pxNewListItem;
+    pxNewListItem->pxContainer = pxList;                /* 挂正面：我归这块区 */
+    pxList->uxNumberOfItems++;
+}
 
-/* uxListRemove：离开这块区（list.c:217）*/
-item->pxPrevious->pxNext = item->pxNext;   /* 左右两位牵手，一步抽离 */
-item->pxNext->pxPrevious = item->pxPrevious;
-item->pxContainer = NULL;                  /* 摘牌 */
-list->uxNumberOfItems--;
+UBaseType_t uxListRemove( ListItem_t *const pxItemToRemove ) {
+    List_t *const pxList = pxItemToRemove->pxContainer; /* 翻正面，就知道自己在哪块区 */
+    pxItemToRemove->pxNext->pxPrevious = pxItemToRemove->pxPrevious;  /* 左右两位牵手 */
+    pxItemToRemove->pxPrevious->pxNext = pxItemToRemove->pxNext;
+    if( pxList->pxIndex == pxItemToRemove )             /* 巡查游标正指着他？往回退一格 */
+        pxList->pxIndex = pxItemToRemove->pxPrevious;
+    pxItemToRemove->pxContainer = NULL;                 /* 摘牌 */
+    return --pxList->uxNumberOfItems;
+}
 ```
 
-`vListInsert`（[list.c:139](../../reference/rtos_src/FreeRTOS-Kernel/list.c#L139)）最关键的是**"有序"**二字——它按 `xItemValue` 升序插。等钟点区正是靠这个：每个人牌子上的号，写的就是他"该被叫醒的那个 tick"，于是**最早到点的人永远排在队头**。这样 §7 里挂钟每响一下，工头只需**瞄一眼队头**就知道有没有人到点，根本不用翻整队——一个排序，把每次 tick 的开销从"看所有人"压到了"看一个人"。
+`vListInsert` 最该盯的是那个 `for` 空循环——它按 `xItemValue` **升序找位**。等钟点区正是靠这个：牌子上的号写的就是"该被叫醒的那个 tick"，于是**最早到点的人永远排在队头**；§7 里挂钟每响，工头只需**瞄一眼队头**，一个排序把每 tick 的开销从"看所有人"压到"看一个人"。而循环条件敢写得这么干脆（不判空、不判尾），全靠 3.3.2 那个**号最大的哨兵**兜底——走到它必停。
 
-`uxListRemove`（[list.c:217](../../reference/rtos_src/FreeRTOS-Kernel/list.c#L217)）则把 3.3.1 那个双向指针用满：左右两位一牵手，任意位置的人**一步抽离**，再摘牌、人数减一。
+`uxListRemove` 则把双向指针用满：`pxNext`/`pxPrevious` 左右一牵手，**任意位置一步抽离**。注意那句 `if( pxList->pxIndex == pxItemToRemove )`——万一巡查游标（§5.3.3 同级轮转那根）正指着要被抽走的人，就先把它往回拨一格，免得游标悬空。这种细节，正是"手撕真源码"才看得到、伪代码会漏掉的地方。
 
 回到 demo：`move SENSOR -> delayed` 不是复制一个 SENSOR，而是**同一个人的那块牌子，正面从"候场"改成了"等钟点"**；`remove LOG <- ready` 是 LOG 的牌子被摘下、从候场区的链里牵走。**链表函数本身普通得很，精巧全在这套牌子—哨兵—游标的组织上**：它让"一个人在哪、这块区有谁、下一个轮到谁"三件事，都变成了 O(1) 或近乎白送的操作。
 
@@ -724,19 +744,35 @@ Cortex-M 有个规矩——**只要进异常，硬件会自动把一批寄存器
 
 ### 6.4 回到 port.c：一条搬运线，两次方向反转
 
-把 [`xPortPendSVHandler()` `L504`](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c#L504) 那段汇编压成 C 骨架，它就是一条规整的搬运线：
+直接抄 [`xPortPendSVHandler()` `L504`](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c#L504) 的真汇编（去掉几行 `isb`/`dsb` 内存屏障和 XMC errata 分支）——一条规整的搬运线：
 
-```c
-old_psp = read_psp();                              /* 拿到旧人柜子的钥匙 */
-save_r4_to_r11_and_exc_return(old_psp);            /* 手动补存另一半现场 */
-pxCurrentTCB->pxTopOfStack = old_psp;              /* 钥匙锁进旧人的柜子(TCB) */
+```asm
+xPortPendSVHandler:                @ naked 函数，纯汇编
+    mrs   r0, psp                  @ ① 读旧人 PSP（旧钥匙）
+    ldr   r3, =pxCurrentTCB
+    ldr   r2, [r3]                 @    r2 = 旧人的 TCB
+    tst   r14, #0x10               @    用了 FPU 吗？（看 EXC_RETURN 的一位）
+    it eq
+    vstmdbeq r0!, {s16-s31}        @    用了就先压高浮点寄存器 s16-s31
+    stmdb r0!, {r4-r11, r14}       @ ② 手动补压 r4-r11 + EXC_RETURN
+    str   r0, [r2]                 @ ③ 新栈顶写进旧 TCB 第一个字段(=pxTopOfStack)
 
-raise_basepri();  vTaskSwitchContext();  clear_basepri();  /* 点名：只改牌，不搬现场 */
+    stmdb sp!, {r0, r3}            @    r0,r3 临时寄存到 handler 自己的 MSP
+    mov   r0, #configMAX_SYSCALL_INTERRUPT_PRIORITY
+    msr   basepri, r0             @ ④ 抬 BASEPRI（挂牌，见 §6.4.2）
+    bl    vTaskSwitchContext       @    点名：只改 pxCurrentTCB，不搬一个寄存器
+    mov   r0, #0
+    msr   basepri, r0             @    摘牌
+    ldmia sp!, {r0, r3}
 
-new_psp = pxCurrentTCB->pxTopOfStack;              /* 取新人柜子的钥匙 */
-restore_r4_to_r11_and_exc_return(new_psp);         /* 手动取回另一半现场 */
-write_psp(new_psp);
-return_via_exc_return();   /* bx r14：异常返回，硬件自动弹回那半张交接单 */
+    ldr   r1, [r3]                 @ ⑤ r1 = 新人的 TCB
+    ldr   r0, [r1]                 @    r0 = 新人 PSP（新钥匙，取自 pxTopOfStack）
+    ldmia r0!, {r4-r11, r14}       @ ⑥ 手动弹回 r4-r11 + EXC_RETURN
+    tst   r14, #0x10
+    it eq
+    vldmiaeq r0!, {s16-s31}        @    用了 FPU 就恢复高浮点
+    msr   psp, r0                 @ ⑦ 写回新 PSP
+    bx    r14                      @ ⑧ EXC_RETURN：异常返回，硬件自动弹回那半张交接单
 ```
 
 #### 6.4.1 前半段收旧人，后半段发新人
