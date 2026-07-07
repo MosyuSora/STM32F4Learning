@@ -20,6 +20,11 @@ xStateListItem
 xEventListItem
 pcTaskName
 pxStack
+pxEndOfStack
+StackType_t
+vApplicationStackOverflowHook
+uxTaskGetStackHighWaterMark
+prvTaskCheckFreeStackSpace
 xMPUSettings
 uxBasePriority
 listSET_LIST_ITEM_OWNER
