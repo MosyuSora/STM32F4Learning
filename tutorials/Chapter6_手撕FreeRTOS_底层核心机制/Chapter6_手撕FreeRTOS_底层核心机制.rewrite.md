@@ -938,17 +938,21 @@ typedef struct QueueDefinition {
 
 数据这条线走通了，可四个人还共用着**同一支笔**——那唯一一路 UART。LOG 正低头写着长长的流水账，COMM 突然有急事也要用它，**这支笔到底归谁、会不会俩人抢着打架？** 下一节的互斥锁，管的就是这个。
 
-## 9 互斥锁：一支笔，一把钥匙
+## 9 信号量：一个不装数据的名额
+
+> （待写）顺着 §8「锁与信号量都是队列的退化」往下：二值信号量（ISR → 任务发一个信号）、计数信号量（管一池资源）。
+
+## 10 互斥锁：一支笔，一把钥匙
 
 传送带解决了"数据怎么交"，可有些东西天生**只能一个人用**：那一支 UART 笔、那条 SPI 总线、那块正在擦写的 Flash。LOG 写日志要用笔，COMM 发响应也要用笔——**两人同时下笔，写出来的字就叠成一团谁也认不得**。这类"同一时刻只容一个人"的资源，得有个规矩管着。
 
-### 9.1 给笔配一把唯一的钥匙
+### 10.1 给笔配一把唯一的钥匙
 
 规矩很朴素：**给这支笔配一把、且只配一把钥匙**。想用笔，先来领钥匙；用完，把钥匙还回去。领着钥匙的那位，叫 **owner（当前持有者）**；想用却没领到的，只能在门外排队等钥匙还回来，叫 **waiter（等待者）**。这把钥匙，就是**互斥锁 mutex**。
 
 注意它和传送带（队列）的分工不一样：队列关心"**东西**从谁传到谁"，钥匙关心"这件**独占资源**眼下归谁"。所以读 mutex，眼睛别盯数据，盯两样：**钥匙在谁手里（owner）、谁在门外等（waiter）**。
 
-### 9.2 优先级反转：一个不相干的人，拖垮了急件
+### 10.2 优先级反转：一个不相干的人，拖垮了急件
 
 钥匙的规矩听着天经地义，可它会捅出一个特别阴、又特别经典的娄子。看这么一幕（三个人：LOG 低优先级、COMM 高优先级，中间还杵着个跟笔毫不相干的中优先级活，就叫它 MID）：
 
@@ -964,7 +968,7 @@ typedef struct QueueDefinition {
 
 > 继承**不是**让 COMM 绕过钥匙抢笔——资源边界一直都在。它只是**给那个占着钥匙的低优先级的人临时"提级"，催他赶紧用完归还**，别被不相干的人插队拖死。
 
-### 9.3 demo：owner 被临时"提级"，还锁后复原
+### 10.3 demo：owner 被临时"提级"，还锁后复原
 
 [`v10_mutex_inheritance`](code/v10_mutex_inheritance/demo.c) 把这条链原样跑了一遍，顺着 owner 读最顺：
 
@@ -982,11 +986,11 @@ LOW_LOG releases mutex, priority restores 3 -> 1
 
 最该盯的证据是 `HIGH_COMM waits for mutex owned by LOW_LOG`：**COMM 优先级最高，却照样越不过还没还钥匙的 LOG**——资源所有权，比优先级更硬。
 
-### 9.4 回到源码：锁为什么住在 queue.c
+### 10.4 回到源码：锁为什么住在 queue.c
 
 第一次翻源码会错愕：**mutex 的代码，居然在 `queue.c` 里。** 手撕一下就懂了——一把锁，本质上就是上一节那条传送带的一个"退化版"。
 
-#### 9.4.1 一把锁，就是一条"长度 1、不装货"的特殊队列
+#### 10.4.1 一把锁，就是一条"长度 1、不装货"的特殊队列
 
 回想 §8.4.1 那个 `union{xQueue, xSemaphore}`——当这副骨架当锁用时，激活的是 `xSemaphore`（[queue.c:74](../../reference/rtos_src/FreeRTOS-Kernel/queue.c#L74)），里头就两样：`xMutexHolder`（谁拿着钥匙）和 `uxRecursiveCallCount`（递归锁重入几次）。
 
@@ -997,17 +1001,17 @@ LOW_LOG releases mutex, priority restores 3 -> 1
 
 于是"领钥匙"就是对这条队列做一次 `receive`，"还钥匙"就是做一次 `send`。**整套满/空/等待/唤醒的机器，直接复用队列的**——这就是它住在 `queue.c` 的全部原因。
 
-#### 9.4.2 领钥匙、记 owner：xQueueSemaphoreTake
+#### 10.4.2 领钥匙、记 owner：xQueueSemaphoreTake
 
 领钥匙走 `xQueueSemaphoreTake`（[queue.c:1659](../../reference/rtos_src/FreeRTOS-Kernel/queue.c#L1659)）。领到，就把 `u.xSemaphore.xMutexHolder` 记成自己——**账上从此写明"这把笔归 COMM"**。领不到（已有 owner），就把自己挂进 §8.4.1 那条 `xTasksWaitingToReceive`——**这正是"门外排队"的真身**，而且照样按优先级排。挂之前，还顺手触发一次优先级继承。
 
-#### 9.4.3 继承：只动 uxPriority，`uxBasePriority` 原封不动
+#### 10.4.3 继承：只动 uxPriority，`uxBasePriority` 原封不动
 
 继承的核心就一句：`xTaskPriorityInherit`（[tasks.c:6650](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L6650)）看到 owner 的优先级比来抢锁的人低，就把 **owner 的 `uxPriority` 抬到跟抢锁人一样高**——可 `uxBasePriority` **一个字节都不碰**。这正是 §2.3.3 埋下的伏笔兑现：一个记"现在多急"、一个记"本来多急"，还锁时才有据可依地填回去。
 
 但"抬优先级"不是改个数就完事——别忘了 §5.3.1，就绪表是**按优先级分桶**的。所以源码得先把 owner **从它原来那只低优先级桶里 `uxListRemove` 摘出来**，改完 `uxPriority`，再 `prvAddTaskToReadyList` **重新挂进那只更高的桶**（[tasks.c:6680](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L6680)）。这样调度器下次挑人，才会真的把它当高优先级看待、不让中优先级再插队。**"提级"这个动作，落到源码就是一次跨桶搬家。**
 
-#### 9.4.4 还钥匙、复原：xTaskPriorityDisinherit
+#### 10.4.4 还钥匙、复原：xTaskPriorityDisinherit
 
 `give` 一把锁时，`xTaskPriorityDisinherit`（[tasks.c:6753](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L6753)）把 `uxPriority` 照着 `uxBasePriority` 填回去（同样是一次跨桶搬家，搬回原桶），清掉 `xMutexHolder`，再唤醒 `xTasksWaitingToReceive` 里最急的那个去领钥匙。一次完整的"提级—复原"闭环，就此合上。
 
@@ -1018,3 +1022,37 @@ LOW_LOG releases mutex, priority restores 3 -> 1
 > **继承是止血，不是根治。** 它只省得下"被中优先级插队"那段时间，却**变不快慢串口本身，也替你缩不短持锁区**。真正该优化的，永远是**持锁区的大小**——别在攥着钥匙时去干慢串口、擦 Flash、大段格式化。钥匙攥得越久，全班组等得越久。
 
 到这儿，任务怎么跑、怎么等、怎么交接、怎么抢资源，都讲遍了。可我们一路都在用 `xTaskCreate`、`xQueueCreate`、`xSemaphoreCreateMutex` 凭空"变"出这些对象——**它们到底从哪块地长出来的？** 任务栈、队列缓冲、锁，桩桩都要占 RAM。下一节的 heap_4，就是管这块地的**地主**。
+
+## PART3 中断与并发安全
+
+## 11 临界区与调度器挂起
+
+> （待写）taskENTER_CRITICAL（BASEPRI 嵌套）、vTaskSuspendAll（不关中断的轻量临界区）、uxSchedulerSuspended；把散在 §4.3.3 / §6.4.2 的收成体系。
+
+## 12 中断里的 RTOS：FromISR 与立刻换班
+
+> （待写）为什么有 xxxFromISR、configMAX_SYSCALL_INTERRUPT_PRIORITY 这条红线、pxHigherPriorityTaskWoken + portYIELD_FROM_ISR 怎样"中断里唤醒任务、退出时立刻换班"。
+
+## PART4 内存：栈与堆
+
+## 13 任务的栈：多大、防溢出、双栈
+
+> （待写）栈该多大怎么估、栈溢出检测两法（染色 / MPU）、高水位 uxTaskGetStackHighWaterMark、MSP / PSP 双栈、静态 vs 动态。
+
+## 14 heap_4：动态对象的 RAM 管家
+
+> （待写）空闲块链表按地址排序、首次适配 pvPortMalloc、相邻块合并防碎片、块头 + 最高位标记。
+
+## PART5 收束与落地
+
+## 15 全景：任务的一生
+
+> （待写）ready / blocked / delayed + 挂起 + 删除全状态；空闲任务 Idle 怎样在没人跑时占位、并回收被删任务的栈和 TCB。
+
+## 16 项目演练：一条日志串起全部机制
+
+> （待写）一条项目日志把 §1–§14 的机制串成一条链，纯机制串讲，无排查。
+
+## 17 速查表 + 结语 + 附录
+
+> （待写）核心机制速查表 + 桥接 Ch7 结语 + 附录（软件定时器 / 事件组 / 任务通知 / 流缓冲 / tickless 属扩展，见官方文档）。
