@@ -1359,96 +1359,90 @@ if( listLIST_IS_EMPTY( &pxQueue->xTasksWaitingToReceive ) == pdFALSE )
 
 ## PART4 内存：栈与堆
 
-## 13 任务的栈：一格柜子，多深、会不会塞爆
+## 13 栈：多任务凭什么成为可能
 
-§1、§6 反复说，每个工人有自己的一格**柜子**——存现场、存局部变量，函数每调进一层就往里再塞一层。前面我们把它当"现场存取的入口"用，这一节把它当**一块实打实的 RAM** 来看：它多深、朝哪个方向塞、塞爆了怎么被发现，还有一件常被忽略的事——车间里其实有**两种柜子**。
+栈是什么、堆是什么，学过 C 的人早清楚，这里不从头讲。这一 PART 只回答一个更要紧的问题：**同样是单片机，8 位机基本只能跑一条主线程，凭什么 Cortex-M 上能跑起 FreeRTOS、让好几个任务各自独立地活着？**
 
-### 13.1 柜子的内存布局：从柜口往柜底塞
+答案不在软件，在**硬件**——具体说，在 CPU 拿什么给不同执行流做**内存隔离**。这一节先把这条硬件线讲透，再看 FreeRTOS 怎么顺着它把"任务"搭出来。
 
-一格柜子，就是创建时给这个任务划的一段连续 RAM（一个 `StackType_t` 数组）。两个地址锁住它的两头：`pxStack` 是**柜底**（低地址），`pxEndOfStack` 是**柜口**（高地址）。关键一点——**Cortex-M 的栈是"向下长"的**：SP（栈指针）从柜口那头（高地址）起步，每塞一层（一次函数调用、一次中断压栈）就往柜底（低地址）挪一截。
+### 13.1 一条内存隔离的谱系：8 位机 → MMU → Cortex-M
+
+一个系统能不能让多个执行流并存、又互不踩烂对方的现场，取决于它有没有、有什么样的**内存隔离**。三档：
+
+- **8 位机（PIC、51 这类）——没有隔离。** 一套栈、一片没有边界的 RAM，谁都能写谁。想同时养几个独立执行流？没有硬件替你把它们的现场隔开，所以本质上只能一条主循环跑到底——**从设计上就撑不起"任务"这种东西。**
+- **跑通用操作系统的大 CPU——MMU 级的强隔离。** 芯片里有个 **MMU（内存管理单元）**，维护着**页表**：每个进程只看得见自己的一套**虚拟地址空间**，彼此完全隔离；虚拟内存还能远大于物理内存（靠换页）。强大，但也复杂、开销大，由操作系统统一管、对应用完全透明。
+- **Cortex-M 这类嵌入式芯片——不上不下：它没有 MMU。** 那它靠什么让任务各自独立？——靠一个便宜得多的硬件机制：**双栈，MSP 与 PSP。**
+
+一句话定调：**不是 FreeRTOS "发明"了多任务，是 Cortex-M 的双栈让"多个执行流各有各的现场"在硬件上成为可能，FreeRTOS 只是把这个硬件能力，组织成了我们叫"任务"的东西。**
+
+### 13.2 双栈 MSP / PSP：没有 MMU，也能把现场隔开
+
+Cortex-M 有**两个栈指针**，硬件层面就分好了工：
+
+- **PSP（Process Stack Pointer）**——线程模式（跑普通代码时）用的栈指针；
+- **MSP（Main Stack Pointer）**——handler 模式（跑异常/中断时）用的栈指针，也是芯片复位后默认用的那个。
+
+关键全在 PSP 这一半。FreeRTOS 给**每个任务单独划一块 RAM 当栈**，并把这块栈的当前栈顶记进它自己的 TCB（§2 的 `pxTopOfStack`）。任务在台上跑时，CPU 的 PSP 指的就是它那块栈；**换任务，本质上就是换一个 PSP 值**（§6 PendSV 干的"存旧 PSP、载新 PSP"）。于是每个任务的调用链、局部变量、被打断时的寄存器现场，全待在**各自独立的那块栈**里，谁也踩不到谁——**这，就是"多个执行流并存"落到物理上的样子。**
+
+MSP 那一半，是留给内核和中断的**公用栈**：急件闯进来（§11）时 CPU 切到 handler 模式、用 MSP，**不去啃任何一个任务本就不宽裕的栈**；芯片一上电、`main` 还没交权前（§6.1），用的也是 MSP。
+
+拿它和 MMU 对一下，就看清 Cortex-M 的取舍了：
+
+| | MMU（大 CPU） | 双栈 MSP/PSP（Cortex-M） |
+| --- | --- | --- |
+| 隔离粒度 | 整个虚拟地址空间，进程间完全隔离 | 只隔离**栈 / 现场**，地址空间还是同一个 |
+| 靠什么 | 页表 + TLB + 换页 | 两个栈指针 + 每任务一块栈 |
+| 代价 | 复杂、开销大、要 OS 统一管 | 极轻、确定性好、无页表 |
+| 虚拟内存 | 有，可远大于物理内存 | 无，全是实打实的物理 RAM |
+
+**Cortex-M 走的是务实那条路**：不追求进程级强隔离，只用双栈把"每个任务的现场"分开——刚好够 RTOS 搭多任务，又便宜到能塞进几十 KB RAM 的芯片里。（题外一句：Cortex-M 另有个可选的 **MPU**，能给内存划几段权限区，但那是"再加一层保护"的选配，不是 MMU 那种地址翻译，跟这里的多任务地基是两码事。）
+
+### 13.3 一块任务栈的一生：SP 到底怎么一升一降
+
+地基讲清了，来看这块栈在 RTOS 里**具体怎么用起来**——把 SP 从任务被创建到跑起来的每一步升降拆开。（Cortex-M 栈**向下生长**：SP 越用越往低地址走。下图 `pxStack` 是低地址那头、`pxEndOfStack` 是高地址那头。）
 
 ![任务栈的内存布局](img/fig-13-stack-layout.svg)
 
-对着图记三件事：
+1. **创建时（§4.3.2）**：FreeRTOS 划一块 RAM 给它当栈（`pxStack`…`pxEndOfStack`），整块刷成 `0xA5`；再在**高地址那头**摆好一份伪造的初始栈帧（§1.3），把这个栈顶地址存进 `pxTopOfStack`。此刻任务还没跑，SP 也还没指向它。
+2. **第一次上台（§6）**：启动 / PendSV 把这块栈的栈顶载入 PSP——PSP 一指过来，CPU 就从那份伪造现场里"异常返回"，任务像从入口活了过来，SP 落在栈顶附近。
+3. **每调进一层函数**：SP **往下走**——压入返回地址、要保护的寄存器、这一层的局部变量；函数一返回，SP **再往上弹回**。图里"已用"那半，就是当前 SP 以上被这样一层层压出来的。
+4. **干活时被急件打断（§11 / §12）**：硬件把一套异常帧（`R0-R3/R12/LR/PC/xPSR`）压进**当前这块 PSP 栈**（SP 又下探一截），再切 MSP 去跑 handler；handler 返回时从 PSP 弹回，任务接着跑。**——所以任务栈必须替随时可能来的急件预留出这份空间。**
+5. **被换下台（§6.4）**：PendSV 把 `R4-R11` 也补压进它的 PSP 栈，把此刻栈顶存回 `pxTopOfStack`；下次上台，再从 TCB 取回栈顶、反着弹出来。
 
-- **上半是已用、下半是空的**。SP 走过的地方（柜口往下），是真实的现场和局部变量；还没走到的（柜底那半），仍是创建时刷的那层 **`0xA5` 漆**（§4.3.2 那记 `memset`，用场就在这儿）。
-- **历史最深那条线，叫高水位**。SP 一辈子往下探到过的最低点——它离柜底还剩多少 `0xA5`，就是这格柜子还剩多少余量。
-- **撞穿柜底 `pxStack`，就是栈溢出**。SP 再往下就出了这格柜子、踩进隔壁的地盘——可能是相邻任务的柜子，甚至是它自己的 TCB。§2.3 说"故障点常不是破坏点"，一大半的诡异 HardFault，根子就在这一撞。
+收束一句：**任务的栈，就是它"能被暂停、能恢复"这件事的物理载体；SP 每一次升降，都是这条执行流在自己那块地上进退。** §1 说任务是"能暂停再继续的执行流"，到这儿才算落到了硬件上。
 
-### 13.2 柜子该开多深：别拍脑袋
+### 13.4 用好它：栈开多深、怎么知道快爆了
 
-一个任务的栈深度，至少要装下这么几样叠加起来的东西：**最坏那条调用链的层数 × 每层的局部变量**，加上偶尔一个大数组、一次 `printf` 的格式化缓冲，**再加上——它正干活时被急件打断，硬件压进来的那套异常帧**（§11 说的 `R0-R3/R12/LR/PC/xPSR`，中断嵌套时还不止一层）。这最后一样最容易被忘，也最容易在"平时没事、一忙就崩"里坑人。
+栈是任务自己的一块定长 RAM，于是两个现实问题绕不开。
 
-开小了，就是**偶发栈溢出**——RTOS 里最难查的一类 bug（崩在哪、根子却在别处）。开大了，白占本就金贵的 RAM。正确姿势是：**先开个宽松值让它跑，再用"高水位"量出它实际用了多深，回头收到刚好留够余量。**
+**开多深**：至少装得下——最坏那条调用链的层数 × 每层局部变量，加偶尔的大数组 / `printf` 缓冲，**再加上被急件打断时压进来的那套异常帧**（还可能嵌套）。最后这项最常被忘、也最坑人（平时没事、一忙就崩）。开小了是偶发溢出（RTOS 里最难查的 bug），开大了白占 RAM——**正解：先开宽松、跑起来量高水位、再收到刚好留够余量。**
 
-### 13.3 回到源码：塞爆了怎么被当场抓住
-
-FreeRTOS 把"检查柜子塞没塞爆"塞进了**每一次换班**（§6 PendSV 切走一个任务前，先查它一眼）。开关是 `configCHECK_FOR_STACK_OVERFLOW`，1 和 2 两档，越查越狠。
-
-#### 13.3.1 法一（==1）：只看 SP 有没有探到柜底
-
-第一档最省事——换班时看一眼这任务的栈顶，是不是已经贴到柜底了（[stack_macros.h:70](../../reference/rtos_src/FreeRTOS-Kernel/include/stack_macros.h#L70)）：
+**怎么知道快爆了**：FreeRTOS 把检查塞进每次换班（§6 切走任务前查一眼），开关 `configCHECK_FOR_STACK_OVERFLOW` 两档。法一只看 SP 有没有贴到栈底（[stack_macros.h:70](../../reference/rtos_src/FreeRTOS-Kernel/include/stack_macros.h#L70)），法二再摸一把栈底那圈 `0xA5` 守卫字节——**漆被磨掉过，就说明 SP 曾扎穿到这**（[stack_macros.h:103](../../reference/rtos_src/FreeRTOS-Kernel/include/stack_macros.h#L103)）：
 
 ```c
-/* 当前存着的栈顶，还在柜子范围内吗？ */
-if( pxCurrentTCB->pxTopOfStack <= pxCurrentTCB->pxStack + portSTACK_LIMIT_PADDING )
-    vApplicationStackOverflowHook( pxCurrentTCB, pxCurrentTCB->pcTaskName );
-```
-
-`pxStack` 是柜底，栈顶要是 `<=` 柜底加一点点余量，说明 SP 已经探到危险区——立刻回调你写的 `vApplicationStackOverflowHook`。快，但有个盲区：它只在**换班那一刻**看 SP；要是任务在两次换班之间猛地扎到底、又缩回来了，这一档就抓不住。
-
-#### 13.3.2 法二（==2）：再查柜底那圈"守卫漆"还在不在
-
-第二档补上盲区——除了看 SP，**还去柜底摸一把那圈 `0xA5` 漆**（[stack_macros.h:103](../../reference/rtos_src/FreeRTOS-Kernel/include/stack_macros.h#L103)）：
-
-```c
-const uint32_t * const pulStack = ( uint32_t * ) pxCurrentTCB->pxStack;   /* 柜底那几格 */
-const uint32_t ulCheckValue = 0xa5a5a5a5U;                                /* 该有的漆 */
+/* 法二（configCHECK_FOR_STACK_OVERFLOW > 1）：SP 越界，或栈底守卫漆被磨掉 */
 if( ( pxCurrentTCB->pxTopOfStack <= pxCurrentTCB->pxStack + portSTACK_LIMIT_PADDING ) ||
-    ( pulStack[0] != ulCheckValue ) || ( pulStack[1] != ulCheckValue ) ||
-    ( pulStack[2] != ulCheckValue ) || ( pulStack[3] != ulCheckValue ) )
+    ( pulStack[0] != 0xa5a5a5a5U ) || ( pulStack[1] != 0xa5a5a5a5U ) ||
+    ( pulStack[2] != 0xa5a5a5a5U ) || ( pulStack[3] != 0xa5a5a5a5U ) )
     vApplicationStackOverflowHook( pxCurrentTCB, pxCurrentTCB->pcTaskName );
 ```
 
-**柜底那几格的漆一旦被磨掉（不再是 `0xA5A5A5A5`），说明 SP 曾经扎穿到过这儿**——哪怕它事后缩了回去，漆也回不来了。就是图里那圈**守卫字节**。比法一多摸几个字节，代价极小，却能逮住"扎一下就跑"的偶发溢出。
-
-#### 13.3.3 高水位：数一数还剩几格没沾过
-
-同一层漆，还能反过来用——量出这格柜子**到底最深用到过哪**。`uxTaskGetStackHighWaterMark` 底下就一个循环（[tasks.c:6375](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L6375)）：
+同一层漆反过来用，就能量**高水位**——`uxTaskGetStackHighWaterMark` 从栈底一路数还没被磨掉的 `0xA5`（[tasks.c:6375](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L6375)），剩得越少越吃紧：
 
 ```c
-static configSTACK_DEPTH_TYPE prvTaskCheckFreeStackSpace( const uint8_t *pucStackByte ) {
-    configSTACK_DEPTH_TYPE uxCount = 0U;
-    while( *pucStackByte == tskSTACK_FILL_BYTE ) {   /* 从柜底往上，一路数还没被磨掉的 0xA5 */
-        pucStackByte -= portSTACK_GROWTH;
-        uxCount++;
-    }
-    return uxCount / sizeof( StackType_t );           /* 换算成"还剩几格从没沾过" */
-}
+while( *pucStackByte == tskSTACK_FILL_BYTE ) { pucStackByte -= portSTACK_GROWTH; uxCount++; }
+return uxCount / sizeof( StackType_t );   /* 还剩几格从没沾过 */
 ```
 
-从柜底起步，只要还是 `0xA5` 就往上数一格，一直数到第一格被磨掉的地方——**没被磨掉的格数，就是这格柜子的余量**。§13.2 说的"先开大、量高水位、再收"，量的就是它。数越小，说明柜子越吃紧、离塞爆越近。
-
-### 13.4 车间里其实有两种柜子：PSP 与 MSP
-
-最后一件容易忽略的事。Cortex-M **有两个栈指针**，对应两种柜子：
-
-- **PSP（Process Stack Pointer）**：**每个任务自己那格柜子**的钥匙，任务在"线程模式"下用它。§6 换班时 PendSV 读旧 PSP、写新 PSP——换的正是"当前用哪格柜子"。
-- **MSP（Main Stack Pointer）**：**内核和所有急件公用的那口大柜**，CPU 在"handler 模式"（跑异常/中断时）用它。
-
-为什么要分两口？——**这样急件就不啃任务的柜子**：一封急件闯进来（§11），handler 在 MSP 那口公用大柜里干活，不占用、也不会写坏某个任务那格本就不宽裕的 PSP 柜子。启动时（§6.1）`main` 一直用的是 MSP，直到第一个任务被扶上台，才切到 PSP。
-
-但有一处衔接得记牢，正好把 §13.2 那句"栈深度要留出异常帧"坐实：**一个任务正干着活被急件打断时，硬件是先把那套异常帧压进它自己的 PSP 柜子，再切去 MSP 跑 handler 的。** 所以每格任务柜子，都得替"随时可能到来的急件"预留出压异常帧的空间——留不够，急件一来就把柜子顶穿了。
-
-柜子（栈）是每个工人**创建时就分好、专属自己**的一块地。可队列、信号量、锁这些**运行中现造**的对象，它们的地又是从哪临时划出来的？那是另一位管家的活——**堆**。
+栈是每个任务**创建时就分好、专属自己**的一块 RAM。可队列、信号量、锁这些**运行中现造**的对象，它们的内存又是从哪临时切出来的？下一节的**堆**，管的就是这个。
 
 ## 14 heap_4：动态对象的 RAM 管家
 
-§13 里，栈是每个工人**创建时就分好、专属自己**的一块地。可 `xQueueCreate`、`xSemaphoreCreateMutex` 这些**运行中现造**的对象，它们的 RAM 是当场"申请"来的——**找谁申请？** FreeRTOS 里，`pvPortMalloc` / `vPortFree` 就是管这块公共地的**地主**：你要建对象就找它划一块地，删对象就把地还回去。
+§13 的栈，是每个任务创建时就分好的固定 RAM。可 `xQueueCreate`、`xSemaphoreCreateMutex` 这些**运行中现造**的对象，内存得当场**动态申请**——这就是 `pvPortMalloc` / `vPortFree`，扮演的正是 C 里 `malloc` / `free` 的角色，只不过 FreeRTOS 没用 libc 的，而是自己实现了一套（还不止一套）。
 
-不过这地主有**好几种脾气**，脾气还差得远——得先认清它们，再说为什么大家默认用第 4 种。
+`malloc/free` 大家都熟，这里不讲它是什么；要讲的是嵌入式里一个绕不开的现实——**FreeRTOS 给了五种堆实现，取舍差得远，得先认清，再说为什么默认用第 4 种。**
 
-### 14.1 五个地主，脾气各不同
+### 14.1 五种堆实现，各有取舍
 
 FreeRTOS 在 `portable/MemMang/` 下给了**五份** `pvPortMalloc` 实现（`heap_1.c` … `heap_5.c`），编译时挑**一份**链进去。一张表先摆开：
 
