@@ -891,7 +891,20 @@ tick=4 sys tick
 
 #### 7.3.1 挂号：把唤醒 tick 写进牌子，插进一支有序队
 
-`vTaskDelay` 的核心动作，是算出**唤醒 tick = 当前 `xTickCount` + 要等的格数**，把它写进这人 `xStateListItem` 牌子上的那个"号"（`xItemValue`），再插进等钟点区。而这一插，用的正是 §3.3.3 的**有序插入**——于是等钟点区里，**最早该醒的人永远排在队头**。挂完号，`vTaskDelay` 立刻触发一次换班，把工作台让出去。
+`vTaskDelay`（[tasks.c:2469](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L2469)）本体薄得很，重活都甩给了一个函数：
+
+```c
+void vTaskDelay( const TickType_t xTicksToDelay ) {
+    if( xTicksToDelay > 0 ) {
+        vTaskSuspendAll();                                  /* 挂号期间先喊"别换班"(§11.3) */
+        prvAddCurrentTaskToDelayedList( xTicksToDelay, pdFALSE ); /* ← 挂号的真活 */
+        xTaskResumeAll();                                   /* 放开，顺带触发一次换班 */
+    }
+    /* xTicksToDelay == 0：不挂号，只强制重新调度一次（相当于 taskYIELD）*/
+}
+```
+
+真正"挂号"的一步是 `prvAddCurrentTaskToDelayedList`：它算出**唤醒 tick = 当前 `xTickCount` + 要等的格数**，写进这人 `xStateListItem` 牌子上的那个号（`xItemValue`），再用 §3.3.3 的**有序插入**挂进等钟点区——于是**最早该醒的人永远排在队头**。而外面那对 `vTaskSuspendAll`/`xTaskResumeAll` 也别放过：挂号要动等钟点区这本公共账，所以先按 §11.3 的法子喊一嗓子"别换班"，挂稳了再放开。
 
 #### 7.3.2 查号的精明：一只"下次闹钟"，让绝大多数 tick 一比就过
 
@@ -900,13 +913,28 @@ tick=4 sys tick
 于是 `xTaskIncrementTick` 里每个 tick 只做一次比较（[tasks.c:4776](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L4776)）：
 
 ```c
-xTickCount++;
-if ( xTickCount >= xNextTaskUnblockTime ) {   /* 绝大多数 tick 这里就 false，直接过 */
-    /* 只有真到点了，才去看队头，收人，再把新队头的时刻记成下次闹钟 */
+xTickCount = xConstTickCount;                             /* tick +1 */
+if( xConstTickCount == 0 ) taskSWITCH_DELAYED_LISTS();    /* 绕回 0，两支队一交换(§7.3.4) */
+
+if( xConstTickCount >= xNextTaskUnblockTime ) {           /* ★ 绝大多数 tick 到这就 false，收工 */
+    for( ;; ) {
+        if( listLIST_IS_EMPTY( pxDelayedTaskList ) ) {
+            xNextTaskUnblockTime = portMAX_DELAY; break;   /* 没人在等，闹钟设到最大 */
+        }
+        pxTCB = listGET_OWNER_OF_HEAD_ENTRY( pxDelayedTaskList );        /* 只看队头 */
+        xItemValue = listGET_LIST_ITEM_VALUE( &pxTCB->xStateListItem );
+        if( xConstTickCount < xItemValue ) {
+            xNextTaskUnblockTime = xItemValue; break;      /* 队头还没到点：记下次闹钟，收工 */
+        }
+        listREMOVE_ITEM( &pxTCB->xStateListItem );         /* 到点了：从等钟点区摘 */
+        if( listLIST_ITEM_CONTAINER( &pxTCB->xEventListItem ) != NULL )
+            listREMOVE_ITEM( &pxTCB->xEventListItem );      /* 若也在等料区，一并摘(§2.3.2) */
+        prvAddTaskToReadyList( pxTCB );                     /* 送回候场区 */
+    }
 }
 ```
 
-绝大多数 tick，没人到点，这一句 `false` 就走完了，**链表碰都不碰**。只有真到某人的点，才去队头收人；而且因为队是有序的，**永远只看队头**——收完一个，就把新队头的唤醒 tick 记成新的 `xNextTaskUnblockTime`，不再往下翻。等钟点区空了，就把闹钟设成 `portMAX_DELAY`（几乎永不触发）。这跟 §3.3.3 "挂钟只瞄队头"是同一手：**把每个 tick 的开销压到近乎一次比较**。
+一整段的精明全在那颗 `★`：绝大多数 tick 没人到点，`xConstTickCount >= xNextTaskUnblockTime` 直接 `false`，**下面整个 `for` 碰都不碰**。真到点了才进循环，而且**只从队头收**（有序，队头必最早），收完一个就把新队头的时刻记成新的 `xNextTaskUnblockTime`、`break` 收工。这跟 §3.3.3 "只瞄队头"是同一手，把每 tick 的开销压到近乎一次比较。顺带三处呼应也都在真码里：开头 `== 0` 的两支队交换（§7.3.4）、`xEventListItem` 那句"顺手一并摘"（§2.3.2 的两块牌子）、以及 `prvAddTaskToReadyList` 只是送回候场——**到点 ≠ 上台**。
 
 顺带记住那行"请求换班"——被叫回候场的人若比台上这位更急，`xTaskIncrementTick` 只是**返回一个"需要换班"的申请**，真正切过去仍是 §6 PendSV 的活。
 
@@ -996,7 +1024,16 @@ typedef struct QueueDefinition {
 
 #### 8.4.2 环形缓冲：写指针走到头，就绕回起点
 
-带子的格子是**一圈**接起来的。每 `send` 一件，`prvCopyDataToQueue`（[queue.c:2393](../../reference/rtos_src/FreeRTOS-Kernel/queue.c#L2393)）把数据拷到 `pcWriteTo`，写指针往前挪 `uxItemSize` 个字节；一旦挪到仓库末尾（`pcTail`），就**绕回起点 `pcHead`**。取件那头同理。为什么绕成一圈？——这样**放/取都不用挪动已有元素、也不用扩容**，永远是 O(1)：来一件写一格、走一件读一格，指针转圈跑就是了。
+带子的格子是**一圈**接起来的。`prvCopyDataToQueue`（[queue.c:2421](../../reference/rtos_src/FreeRTOS-Kernel/queue.c#L2421)）往队尾写一件，就这四行：
+
+```c
+memcpy( pxQueue->pcWriteTo, pvItemToQueue, pxQueue->uxItemSize );  /* 拷进仓库 */
+pxQueue->pcWriteTo += pxQueue->uxItemSize;                        /* 写指针前进一件 */
+if( pxQueue->pcWriteTo >= pxQueue->u.xQueue.pcTail )               /* 到仓库末尾了？ */
+    pxQueue->pcWriteTo = pxQueue->pcHead;                          /* 绕回起点 */
+```
+
+那句 `if( ... >= pcTail ) pcWriteTo = pcHead` 就是"绕成一圈"；取件那头（`pcReadFrom`）同理反着走。为什么绕圈？——**放/取都不挪动已有元素、也不扩容**，永远 O(1)：来一件写一格、走一件读一格，两个指针沿着圈转。
 
 #### 8.4.3 为什么"按值拷贝"，不传指针
 
@@ -1045,7 +1082,19 @@ typedef struct QueueDefinition {
 
 `xSemaphoreCreateBinary`、`xQueueCreateCountingSemaphore`（[queue.c:912](../../reference/rtos_src/FreeRTOS-Kernel/queue.c#L912)）说穿了，都是拿队列的创建函数、把**每件大小设成 0**（§8 开头那个 `queueSEMAPHORE_QUEUE_ITEM_LENGTH` 就是 0）造出来的。`give` 走的还是 `xQueueGenericSend`，`take` 走的还是 `xQueueSemaphoreTake`——全是 §8/§10 见过的同一批函数。
 
-关键就在"每件 0 字节"这一下。`prvCopyDataToQueue`（[queue.c:2393](../../reference/rtos_src/FreeRTOS-Kernel/queue.c#L2393)）里有个分岔：**当 `uxItemSize` 是 0，它一个字节都不拷**，只把 `uxMessagesWaiting` 加一（或减一）。于是"发信号"就退化成了"把那个计数 +1"，"等信号"退化成"等那个计数 > 0"。数据搬运整个省了，**只剩一个数在动**。
+关键就在"每件 0 字节"这一下。`prvCopyDataToQueue`（[queue.c:2404](../../reference/rtos_src/FreeRTOS-Kernel/queue.c#L2404)）开头就分岔：
+
+```c
+if( pxQueue->uxItemSize == ( UBaseType_t ) 0 ) {   /* 信号量/锁：根本不装数据 */
+    /* ……这里一个 memcpy 都没有；若这条队是 mutex，还顺手做优先级复原…… */
+}
+else if( xPosition == queueSEND_TO_BACK ) {
+    memcpy( pxQueue->pcWriteTo, pvItemToQueue, pxQueue->uxItemSize );  /* 队列才真拷数据 */
+    /* …… 环形推进，见 §8.4.2 …… */
+}
+```
+
+**`uxItemSize == 0` 这条分支里，连一个 `memcpy` 都没有**——数据搬运整个省了，`send`/`receive` 就退化成把 `uxMessagesWaiting` 加一 / 减一。所以"发信号"＝"计数 +1"、"等信号"＝"等计数 > 0"，只剩一个数在动。（还顺手看见：这条分支里若是 mutex，`give` 时会做**优先级复原**——那正是 §10 那把"带主人的信号量"比普通信号量多出来的活。）
 
 而满/空/挂等待链/按优先级唤醒——这套机器，信号量**原封不动白捡** §8 的：等信号的任务照样挂在 `xTasksWaitingToReceive`，`give` 一下照样把里头最急的那个拎回候场。
 
@@ -1124,9 +1173,23 @@ LOW_LOG releases mutex, priority restores 3 -> 1
 
 #### 10.4.3 继承：只动 uxPriority，`uxBasePriority` 原封不动
 
-继承的核心就一句：`xTaskPriorityInherit`（[tasks.c:6650](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L6650)）看到 owner 的优先级比来抢锁的人低，就把 **owner 的 `uxPriority` 抬到跟抢锁人一样高**——可 `uxBasePriority` **一个字节都不碰**。这正是 §2.3.3 埋下的伏笔兑现：一个记"现在多急"、一个记"本来多急"，还锁时才有据可依地填回去。
+继承的核心，抄下来就这么一段（[xTaskPriorityInherit](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L6650)）：
 
-但"抬优先级"不是改个数就完事——别忘了 §5.3.1，就绪表是**按优先级分桶**的。所以源码得先把 owner **从它原来那只低优先级桶里 `uxListRemove` 摘出来**，改完 `uxPriority`，再 `prvAddTaskToReadyList` **重新挂进那只更高的桶**（[tasks.c:6680](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L6680)）。这样调度器下次挑人，才会真的把它当高优先级看待、不让中优先级再插队。**"提级"这个动作，落到源码就是一次跨桶搬家。**
+```c
+if( pxMutexHolderTCB->uxPriority < pxCurrentTCB->uxPriority ) {   /* owner 比抢锁人低 */
+    /* owner 若正躺在就绪表里，得给它搬桶 */
+    if( listIS_CONTAINED_WITHIN( &pxReadyTasksLists[ pxMutexHolderTCB->uxPriority ],
+                                 &pxMutexHolderTCB->xStateListItem ) != pdFALSE ) {
+        uxListRemove( &pxMutexHolderTCB->xStateListItem );      /* ① 从旧(低)桶摘出 */
+        pxMutexHolderTCB->uxPriority = pxCurrentTCB->uxPriority; /* ② 抬 uxPriority */
+        prvAddTaskToReadyList( pxMutexHolderTCB );              /* ③ 挂进新(高)桶 */
+    } else {
+        pxMutexHolderTCB->uxPriority = pxCurrentTCB->uxPriority; /* 不在就绪表就只改数 */
+    }
+}
+```
+
+盯两处：一是全程**只写 `uxPriority`，`uxBasePriority` 一个字节都不碰**——§2.3.3 埋的伏笔兑现，一个记"现在多急"、一个记"本来多急"，还锁时照后者填回。二是①②③——**"提级"不是改个数就完**：§5.3.1 说过就绪表**按优先级分桶**，所以得先把 owner 从旧(低)桶 `uxListRemove` 摘出、改完再 `prvAddTaskToReadyList` 挂进新(高)桶。**"提级"落到源码，就是一次跨桶搬家**，调度器下次挑人才会真把它当高优先级、不让中优先级再插队。
 
 #### 10.4.4 还钥匙、复原：xTaskPriorityDisinherit
 
