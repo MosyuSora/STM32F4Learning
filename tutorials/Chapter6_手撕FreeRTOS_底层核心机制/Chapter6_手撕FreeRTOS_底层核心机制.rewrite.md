@@ -550,7 +550,35 @@ return (TaskHandle_t) pxNewTCB;                                     /* 交回句
 
 #### 4.3.2 prvInitialiseNewTask：那些不起眼却讲究的动作
 
-翻开 `prvInitialiseNewTask`（[tasks.c:1816](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L1816)），会看到一串平平无奇的赋值。可每一行几乎都在解决一个具体问题：
+翻开 `prvInitialiseNewTask`（[tasks.c:1816](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L1816)），会看到一串平平无奇的赋值。可每一行几乎都在解决一个具体问题。抄下最要紧的那几段（去掉配置分支）：
+
+```c
+/* ① 整块栈刷成已知漆，为高水位测量打底 */
+memset( pxNewTCB->pxStack, tskSTACK_FILL_BYTE, uxStackDepth * sizeof( StackType_t ) );
+
+/* ② 栈顶 = 数组末尾，再往下抹到 8 字节对齐 */
+pxTopOfStack = &( pxNewTCB->pxStack[ uxStackDepth - 1 ] );
+pxTopOfStack = ( StackType_t * )
+    ( ( ( portPOINTER_SIZE_TYPE ) pxTopOfStack ) & ( ~( portPOINTER_SIZE_TYPE ) portBYTE_ALIGNMENT_MASK ) );
+configASSERT( ( ( portPOINTER_SIZE_TYPE ) pxTopOfStack & portBYTE_ALIGNMENT_MASK ) == 0U );
+
+/* ③ 名字逐字抄进 TCB，末尾强制收尾 */
+for( x = 0; x < configMAX_TASK_NAME_LEN; x++ ) {
+    pxNewTCB->pcTaskName[ x ] = pcName[ x ];
+    if( pcName[ x ] == 0 ) { break; }
+}
+pxNewTCB->pcTaskName[ configMAX_TASK_NAME_LEN - 1 ] = '\0';
+
+/* ④ 优先级夹紧——它马上要当就绪表的数组下标 */
+if( uxPriority >= configMAX_PRIORITIES ) { uxPriority = configMAX_PRIORITIES - 1; }
+pxNewTCB->uxPriority = uxPriority;
+
+/* ⑤ 两块牌子建档 */
+vListInitialiseItem( &( pxNewTCB->xStateListItem ) );
+vListInitialiseItem( &( pxNewTCB->xEventListItem ) );
+```
+
+对着逐行拆：
 
 - **先把柜子刷一层漆（栈染色）**：`memset(pxStack, 0xA5, …)`——工位还没人用，先把整个栈刷成同一种漆（`0xA5`）。图啥？将来看这层漆被磨掉了多少，就知道这人干活时最深压到过哪一格——**栈到底用了多少、会不会溢出，一眼可量**。这就是"栈高水位"能测出来的根。
 - **栈顶不是随手取的，要对齐**：算栈顶时，不是简单取数组最后一格，而是往下**抹到 8 字节对齐**（Cortex-M 的硬性要求），还配了个 `configASSERT` 兜底。对不齐，将来异常压栈就会出乱子。
@@ -630,12 +658,24 @@ tick=4 switch_to=COMM priority=3
 
 桶可能有几十只，怎么飞快找到"有人、且优先级最高"的那只？一只一只翻太慢。FreeRTOS 的招法极妙：**另存一张位图** `uxTopReadyPriority`——一个 32 位的字，第 N 位是 1，就表示"N 号桶里有人"。于是"找最高非空桶"就化简成了"找这个字里**最高的那个 1**"。
 
-而"找最高位的 1"，Cortex-M 有一条**硬件指令 CLZ（数前导零）**专干这个。优化版直接一步算出来（[portmacro.h:171](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/portmacro.h#L171)）：
+而"找最高位的 1"，Cortex-M 有一条**硬件指令 CLZ（数前导零）**专干这个。连同"挑那只桶的队头"，两个真宏一起抄下来看（[portmacro.h:171](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/portmacro.h#L171) + [tasks.c:236](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L236)）：
 
 ```c
-/* 数一下位图前面有几个 0，就知道最高的 1 在第几位 */
-uxTopPriority = 31 - CLZ(uxTopReadyPriority);
+/* portmacro.h：数位图前导零 → 最高非空桶的号，一条指令 */
+#define portGET_HIGHEST_PRIORITY( uxTopPriority, uxReadyPriorities ) \
+    uxTopPriority = ( 31UL - ( uint32_t ) ucPortCountLeadingZeros( ( uxReadyPriorities ) ) )
+
+/* tasks.c：挑最高桶 → 取该桶队头（推游标）→ 就是当前任务 */
+#define taskSELECT_HIGHEST_PRIORITY_TASK()                                     \
+    do {                                                                       \
+        UBaseType_t uxTopPriority;                                             \
+        portGET_HIGHEST_PRIORITY( uxTopPriority, uxTopReadyPriority );         \
+        listGET_OWNER_OF_NEXT_ENTRY( pxCurrentTCB,                             \
+                                     &( pxReadyTasksLists[ uxTopPriority ] ) );\
+    } while( 0 )
 ```
+
+`ucPortCountLeadingZeros` 就是那条 `clz` 指令的包装。第二个宏一眼串起 5.3.1–5.3.3：`portGET_HIGHEST_PRIORITY` 挑桶（位图 + CLZ）、`pxReadyTasksLists[uxTopPriority]` 是那只桶、`listGET_OWNER_OF_NEXT_ENTRY` 推游标取队头（同级轮转）。
 
 **不管你有 4 个还是 32 个优先级，永远一条指令出结果，O(1)。** 这一处设计还顺带解释了两件事：为什么优先级总数被限制在 **≤ 32**（一个 32 位字刚好装得下这张位图），以及源码里那句"极少有系统需要超过 10~15 个优先级"的底气从哪来。（没有 CLZ 的平台，退回通用版：从最高位那只桶往下、一只一只试空，见 [tasks.c:195](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L195)。）
 
