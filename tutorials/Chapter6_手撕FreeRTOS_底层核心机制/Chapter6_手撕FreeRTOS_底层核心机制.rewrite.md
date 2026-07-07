@@ -1084,19 +1084,50 @@ LOW_LOG releases mutex, priority restores 3 -> 1
 
 ### 11.2 taskENTER_CRITICAL：不掐门铃，只挂一块"急件缓一缓"的牌
 
-你可能以为 `taskENTER_CRITICAL()` 就是把门铃线掐了。Cortex-M 上它讲究得多。顺源码看：`portENTER_CRITICAL()` → `vPortEnterCritical()`（[port.c:475](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c#L475)），它那个"关中断"，其实是抬 `BASEPRI`——相当于在门口挂出一块牌子：**加急等级低于这条红线的急件，记账这会儿先在门外候着；高于红线的（真·特大火警）照样随时能闯进来。**
+别停在比喻上，直接抄源码。`taskENTER_CRITICAL()` 一路展开到 `vPortEnterCritical()`（[port.c:475](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c#L475)），它和出口配成一对，短得能整段抄下来：
 
-所以临界区**不是把车间变聋**，而是"**把爱来搅账的那批急件先拦一拦，最要命的照放**"——既护住了账，又没把关键急件的响应拖垮。这跟 §6.4.2 里 PendSV 挑人前后那两句 `BASEPRI`，就是同一块牌子。
+```c
+void vPortEnterCritical( void ) {
+    portDISABLE_INTERRUPTS();       /* ① 挂牌：抬 BASEPRI（见下） */
+    uxCriticalNesting++;            /* ② 牌子层数 +1 */
+    if( uxCriticalNesting == 1 )    /* ③ 只在最外层查一次…… */
+        configASSERT( ( portNVIC_INT_CTRL_REG & portVECTACTIVE_MASK ) == 0 );
+}                                   /*   ……"不许从急件(ISR)里进临界区！" */
 
-这牌子还能**叠着挂**：`uxCriticalNesting`（[port.c:161](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/port.c#L161)）数着挂了几层，进一层 `+1`、出一层 `-1`，**减到 0 才真把牌子摘下来**。于是"护着账的函数里，又调了另一个也要护账的函数"不会提前露馅——里层退出时摘的是自己那层，外层那块牌还稳稳挂着。
+void vPortExitCritical( void ) {
+    configASSERT( uxCriticalNesting );
+    uxCriticalNesting--;            /* 层数 -1 */
+    if( uxCriticalNesting == 0 )    /* 减到 0，才真摘牌 */
+        portENABLE_INTERRUPTS();
+}
+```
 
-用法就两条死规矩：牌子挂着的这几步要**极短**；而且**绝不能在挂牌时调用会让工人睡过去（阻塞）的 API**——挂着"别打扰"的牌、人却自己跑去睡了，整个车间会跟着僵死。
+对着比喻逐行拆：① 就是"挂牌"；② `uxCriticalNesting++` 就是"叠着挂"、出口那句 `if( ...==0 )` 就是"减到 0 才真摘牌"——A 函数护着一段、里头调了同样护账的 B，B 退出时把计数从 `2` 减到 `1`，A 的牌还稳稳挂着。而 ③ 那句 `configASSERT`，是顺手查一下"当前是不是在急件（ISR）里"——**这个普通版临界区不许在急件里用**，急件要用的是另一套 `FromISR`（下一节）。
+
+那"挂牌"具体挂的是什么？`portDISABLE_INTERRUPTS()` 展开成 `vPortRaiseBASEPRI()`（[portmacro.h:213](../../reference/rtos_src/FreeRTOS-Kernel/portable/GCC/ARM_CM4F/portmacro.h#L213)），核心就一条汇编：
+
+```asm
+msr basepri, %0    @ %0 = configMAX_SYSCALL_INTERRUPT_PRIORITY
+```
+
+把那条红线的值，写进 `BASEPRI` 寄存器——CPU 从此把"**加急等级不高于红线**"的中断全挡在门外（Cortex-M 里优先级数值越大越不急，`BASEPRI` 挡的正是数值 ≥ 它的那批），比红线更急的（数值更小）照闯不误。**整个临界区最硬的机密，就浓缩在这一条 `msr` 指令里**——它和 §6.4.2 里 PendSV 挑人前后那两句，本就是同一条指令。
+
+所以用法就两条死规矩：牌子挂着的这几步要**极短**；且**绝不能在挂牌时调用会让工人睡过去（阻塞）的 API**——挂着"别打扰"的牌、人却自己跑去睡了，整个车间会跟着僵死。
 
 ### 11.3 vTaskSuspendAll：账只有工人在抢，喊一声"都别换班"就够
 
 挂 `BASEPRI` 那块牌，毕竟连累了一批急件。可有时候你要护的账，**只有工人之间会抢、急件根本不碰**（比如工头从头到尾数一遍花名册）。为这点事去拦急件，太亏。
 
-于是有更轻的一招：`vTaskSuspendAll()`（[tasks.c:3848](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L3848)）——它**一根门铃线都不碰**，只把 `uxSchedulerSuspended` 加一（[tasks.c:3886](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L3886)），等于工头扯着嗓子喊一句："这会儿谁都别换班！"于是工人插不进来、**可急件照闯、照办**。数完了 `xTaskResumeAll()` 把话收回。
+于是有更轻的一招 `vTaskSuspendAll()`（[tasks.c:3848](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L3848)）。它的核心，抄下来只有一句：
+
+```c
+void vTaskSuspendAll( void ) {
+    /* 注意：这里没有临界区，连门铃都没碰 */
+    uxSchedulerSuspended = uxSchedulerSuspended + 1U;   /* 就这一句：牌子层数 +1 */
+}
+```
+
+就把 `uxSchedulerSuspended` 自增一下，等于工头扯嗓子喊："这会儿谁都别换班！"于是工人插不进来、**可急件照闯照办**。有意思的是它敢**不加锁**——源码上头压着一大段注释论证：一次换班只会在这个计数**归零时**才把本任务换回来，所以这句读-改-写天生安全（一个挺妙的并发论证，感兴趣可去啃那段注释）。喊完话，`xTaskResumeAll()` 再把它减回去。
 
 这一嗓子，正好收了前面埋的两处伏笔：§5.3 调度骨架里那句"调度器被挂起就只记个 pending、先不真切"、§7 `xTaskIncrementTick` 进门先瞄的那一眼——问的都是"工头这会儿喊没喊'别换班'"。喊话期间到的 tick 不会丢，而是**先记账攒着**（pended ticks），等 `xTaskResumeAll` 一次补上。代价同样是这一嗓子要短。
 
