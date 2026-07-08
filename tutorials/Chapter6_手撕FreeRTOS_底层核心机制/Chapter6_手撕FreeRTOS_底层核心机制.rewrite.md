@@ -1920,7 +1920,60 @@ stateDiagram-v2
 
 ## 19 项目演练：一条日志串起全部机制
 
-> （待写）一条项目日志把 §1–§17 的机制串成一条链，纯机制串讲，无排查。
+前面十七节，我们把零件一个个拆开摊在台面上。这一节不拆新东西，只做一件事：**把所有零件装回去，让它们在一条真实的时间线上一起转一圈。** 场景还是 §0 那个四人车间——四个任务：`LED`（最闲，指示灯呼吸）、`SENSOR`（周期采样）、`COMM`（收发协议帧）、`LOG`（落盘/上报）。我们跟着"一帧数据从产生到落盘"走一遍，看每一步分别是前面哪一节的机制在发力。
+
+### 19.1 开机：从 main 到四个任务各就各位
+
+上电后、`vTaskStartScheduler()` 之前，芯片跑在 `main` 里、用的是 MSP（§16）。一段典型的启动日志是这样的：
+
+```text
+[boot] heap_4 init: 32 KB 一整块空闲                      // §17 prvHeapInit
+[boot] xTaskCreate("LED",   prio=1)  -> 就绪链[1]          // §4 三步组装 + 挂就绪
+[boot] xTaskCreate("SENSOR",prio=3)  -> 就绪链[3]
+[boot] xTaskCreate("COMM",  prio=4)  -> 就绪链[4]
+[boot] xTaskCreate("LOG",   prio=2)  -> 就绪链[2]
+[boot] vTaskStartScheduler(): 自动建 Idle(prio=0)          // §5/§7 空闲任务
+[boot] SVC 启动第一个任务 -> 位图最高非空桶=4 -> COMM 上台   // §6 位图+CLZ, §7 SVC
+```
+
+短短几行，已经串起小半章：每个 `xTaskCreate` 都是 §4 那"入职三步 + 裹临界区挂就绪"；建 Idle 是 §5/§7；最后 `vTaskStartScheduler` 用 §6 的位图 + CLZ 一步选出最急的 `COMM`，再由 §7 的 SVC 把它扶上台。**开机的本质，就是把四个 TCB 挂进就绪链、然后点名最急的那个。**
+
+### 19.2 稳态：一帧数据的旅程
+
+系统跑起来后，最有代表性的一条链是"传感器采样 → 协议处理 → 落盘"。把它摆到时间线上：
+
+![一帧数据的旅程：七步串起全章机制](img/fig-runtime-trace.svg)
+
+对着七步逐一认机制（这正是"手撕"之后该有的融会贯通）：
+
+1. **tick 到点，SENSOR 醒来（§8）。** SysTick 每响一下，`xTaskIncrementTick` 就查"下次闹钟"；轮到 `SENSOR` 的延时到期，它被从延时链拎回就绪链。
+2. **SENSOR 上台，投数据进队列（§6 / §9）。** 它比当前在跑的谁都急就被 PendSV 扶上台，采样后 `xQueueSend(dataQ, &frame)`——把一帧**按值拷贝**进环形缓冲，随即 `vTaskDelay` 再睡下。
+3. **COMM 被队列唤醒（§9）。** `COMM` 本来阻塞在 `xQueueReceive` 上，队列一来货，它被从队列的等待链摘回就绪、取走这帧。
+4. **COMM 取互斥锁写共享缓冲（§11）。** 要往多个任务共享的解析缓冲区写，先 `xSemaphoreTake(bufMutex)` 拿钥匙，独占着改，改完才放。
+5. **串口 ISR 插进来（§15）。** 正改着，UART 来了新字节触发中断。中断只做最少的事：`xQueueSendFromISR` 把原始字节丢进队列、置 `pxHigherPriorityTaskWoken`，`portYIELD_FROM_ISR` 让它**一退出中断就换到被叫醒的更急任务**——绝不在中断里慢慢解析。
+6. **COMM 放锁 + 点亮"帧就绪"灯（§11 / §12）。** 处理完这帧，`xSemaphoreGive(bufMutex)` 还钥匙，再 `xEventGroupSetBits(FRAME_READY)`——一次点灯**广播**唤醒所有等这盏灯的订阅者（这里是 `LOG`）。这就是 §13 说的发布-订阅：`COMM` 不必认识 `LOG`。
+7. **都睡下了，Idle 上台（§5 / §7）。** 四个任务这一轮都进了阻塞/延时，就绪链只剩优先级 0 的 `Idle`。它上台空转，顺手跑 `prvCheckTasksWaitingTermination`——要是刚才谁调了 `vTaskDelete`，离职手续就在这一刻办结、栈和 TCB 还给 heap_4。
+
+### 19.3 一段插曲：优先级继承（§11）
+
+把第 4 步稍微加点戏，就重现了 §11 的优先级反转：假设**低优先级**的 `LOG` 先攥着 `bufMutex`，这时**高优先级**的 `COMM` 也来要——`COMM` 只能阻塞等锁。偏巧中优先级的 `SENSOR` 一直有活干，把 `LOG` 死死压在台下，`LOG` 迟迟放不了锁，`COMM` 就被一个跟锁毫不相干的 `SENSOR` 拖住了。**继承机制**此刻登场：内核把持锁的 `LOG` 临时**提级**到和 `COMM` 一样高（只动 `uxPriority`、不动 `uxBasePriority`），让它赶紧跑完、放锁，`COMM` 拿到锁后 `LOG` 再复原。一次教科书级的"止血"，全在 §11 拆过的那几行里。
+
+### 19.4 这条日志，就是本章的目录
+
+回头看，这一整趟没有一步是新的——每一步都能在前面某节找到它的源码：
+
+| 日志里的一步 | 背后的机制 | 哪节手撕过 |
+| --- | --- | --- |
+| `xTaskCreate` 挂就绪 | 入职三步 + 临界区 | §4 |
+| `vTaskStartScheduler` 点名 | 位图 + CLZ + SVC | §6 / §7 |
+| `SENSOR` 到点醒来 | 延时链 + tick | §8 |
+| `xQueueSend/Receive` | 环形缓冲 + 两条等待链 | §9 |
+| `xSemaphoreTake/Give` + 继承 | mutex = 特殊队列 + 提级 | §11 |
+| `xQueueSendFromISR` + 退出换班 | 红线 + FromISR + PendSV | §15 |
+| `xEventGroupSetBits` 广播 | 灯排 + 无序等待链 | §12 |
+| `Idle` 办离职手续 | 待离职链 + 空闲任务 | §5 |
+
+> **把一个 RTOS 学透的标志，不是能背出 API，而是听到一条运行日志，脑子里能立刻浮现出它在内核里走的每一步。** 到这儿，你已经能做到了。
 
 ## 20 结语：拆到了什么，接下来往哪走
 
@@ -1972,4 +2025,71 @@ stateDiagram-v2
 
 ## 21 速查表 + 附录
 
-> （待写）核心机制速查表（对象/链表/关键函数一页纸）+ 子系统跳转表 + 扩展清单（软件定时器 / 任务通知 / 流缓冲 / tickless 属扩展，见官方文档）。
+一整章读完，这一节留作**一页纸的回查**——忘了某个机制住在哪、某个字段干嘛，翻这里。
+
+### 21.1 对象 ↔ 结构体 ↔ 关键字段
+
+FreeRTOS 的每样东西，本质都是"一个结构体 + 挂在身上的几块牌子"。认对象，先认它的字段：
+
+| 对象 | 结构体 | 几个关键字段 | 手撕于 |
+| --- | --- | --- | --- |
+| 任务 | `TCB_t` | `pxTopOfStack`（排第一）、`xStateListItem`/`xEventListItem`、`uxPriority`/`uxBasePriority`、`pxStack` | §2 |
+| 内核链表 | `List_t` / `ListItem_t` | `pxIndex`（游标）、`xListEnd`（哨兵）、`pvOwner`、`xItemValue`（排序号） | §3 |
+| 队列/信号量/互斥 | `Queue_t` | `pcHead`/`pcWriteTo`（环形缓冲）、`uxMessagesWaiting`、`xTasksWaitingToSend`/`ToReceive`、`u.xSemaphore.xMutexHolder` | §9–§11 |
+| 事件组 | `EventGroup_t` | `uxEventBits`（灯排）、`xTasksWaitingForBits`（无缓冲、单等待链） | §12 |
+| 堆内存块 | `BlockLink_t` | `pxNextFreeBlock`、`xBlockSize`（最高位当"已占"旗） | §17 |
+
+### 21.2 常用 API 速查（会不会阻塞，最要命）
+
+| 想干什么 | API | 会阻塞吗 | 手撕于 |
+| --- | --- | --- | --- |
+| 建 / 删任务 | `xTaskCreate` / `vTaskDelete` | 否 | §4 / §5 |
+| 睡一会儿 | `vTaskDelay` / `vTaskDelayUntil` | **是** | §8 |
+| 挂起 / 恢复 | `vTaskSuspend` / `vTaskResume` | 否 | §18 |
+| 收发数据 | `xQueueSend` / `xQueueReceive` | **是**（满/空时） | §9 |
+| 名额 / 叫醒绳 | `xSemaphoreCreateBinary`·`Counting` + `Take`/`Give` | Take **可能** | §10 |
+| 抢独占资源 | `xSemaphoreCreateMutex` + `Take`/`Give`（带继承） | Take **可能** | §11 |
+| 等一组事件 | `xEventGroupWaitBits` / `xEventGroupSetBits` | Wait **可能** | §12 |
+| 锁一小段临界区 | `taskENTER_CRITICAL` / `taskEXIT_CRITICAL` | 否（关中断） | §14 |
+| 只挡换班、不关中断 | `vTaskSuspendAll` / `xTaskResumeAll` | 否 | §14 |
+| 中断里喊人 | `xxxFromISR` + `portYIELD_FROM_ISR` | **绝不阻塞** | §15 |
+| 动态内存 | `pvPortMalloc` / `vPortFree` | 否 | §17 |
+| 查栈还剩多深 | `uxTaskGetStackHighWaterMark` | 否 | §16 |
+
+> **铁律：带"会阻塞"的 API，绝不能在临界区里、更不能在中断里调用**（中断要用对应的 `FromISR` 版本）。这条踩了，全车间僵死。
+
+### 21.3 内核链表一览：任务可能挂在哪张表上
+
+| 链表 | 含义（任务的状态） | 手撕于 |
+| --- | --- | --- |
+| `pxReadyTasksLists[prio]` | 就绪：按优先级分桶排队 | §3 / §6 |
+| `pxDelayedTaskList` / `pxOverflowDelayedTaskList` | 阻塞·带超时：按唤醒 tick 排序 | §8 |
+| 每个队列的 `xTasksWaitingToSend` / `ToReceive` | 阻塞·等资源 | §9 |
+| 事件组的 `xTasksWaitingForBits` | 阻塞·等灯 | §12 |
+| `xSuspendedTaskList` | 挂起：无条件按停 | §18 |
+| `xTasksWaitingTermination` | 待离职：等 Idle 办结 | §5 |
+
+### 21.4 源码文件跳转表
+
+想直接扎进源码时，从这张表找门：
+
+| 文件 | 管什么 | 本章哪几节 |
+| --- | --- | --- |
+| `tasks.c` | 任务、调度、tick、延时、挂起、删除 | §1–§8、§18 |
+| `list.c` | 内核双向链表 + 哨兵 | §3 |
+| `queue.c` | 队列 / 信号量 / 互斥锁（同一副骨架） | §9–§11 |
+| `event_groups.c` | 事件组 | §12 |
+| `portable/…/port.c` | PendSV / SVC / 临界区 / BASEPRI / 建栈 | §7、§14、§16 |
+| `portable/MemMang/heap_4.c` | 堆：首次适配 + 合并 | §17 |
+
+### 21.5 附录：本章没细讲、但你该知道的扩展
+
+第六章聚焦"最核心的那几台机器"。下面这些是 FreeRTOS 的常用扩展，**原理都建立在本章拆过的机制之上**，用时查官方文档即可：
+
+- **软件定时器（`timers.c`）**：一个定时器服务任务 + 一条命令队列——本质是把"到点回调"这件事，做成一个特殊任务在管。是 §8 挂钟思想的延伸。
+- **任务通知（Task Notification）**：每个任务自带一个 32 位通知值，`xTaskNotifyGive` / `ulTaskNotifyTake` 等。**点对点**场景下比队列/信号量更轻（不另建对象），是 §10/§13 的高频优化选择。
+- **流缓冲 / 消息缓冲（`stream_buffer.c`）**：面向**单生产者单消费者**的字节流 / 变长消息，比队列更省。生产者-消费者（§13）的又一落地。
+- **Tickless Idle（`configUSE_TICKLESS_IDLE`）**：空闲时停掉周期性 tick 中断以省电，靠 §5 的空闲任务钩子实现——低功耗产品必调。
+- **MPU 移植（`-MPU` 端口）**：给内存分段加权限保护，正是 §16 说的"要真墙得配 MPU"那条路。
+
+> 这些都不神秘：认得出它是"哪套已知机制的变体或延伸"，你就能顺着本章建立的世界观自己读懂它。第六章到此结束——下一章，我们把这套内核**裁到合身、并证明它跑得又对又准时**。

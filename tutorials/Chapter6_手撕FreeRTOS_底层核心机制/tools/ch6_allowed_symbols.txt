@@ -180,3 +180,7 @@ eventUNBLOCKED_DUE_TO_BIT_SET
 uxBitsToWaitFor
 xWaitForAllBits
 xClearOnExit
+
+# --- extensions mentioned in §21 附录 ---
+xTaskNotifyGive
+ulTaskNotifyTake
