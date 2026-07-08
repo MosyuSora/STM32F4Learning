@@ -617,28 +617,28 @@ vListInitialiseItem( &( pxNewTCB->xEventListItem ) );
 
 > **人不能一边站在木板上，一边锯断这块木板。** 删除"正在运行的自己"，天生做不到"就地干净利落"。
 
-FreeRTOS 的解法很干脆——**删自己，只做一半；剩下一半，交给一个永远闲着的任务事后来做。**
+FreeRTOS 的解法很干脆——**自己给自己办离职，只能办一半；剩下一半手续，交给一个永远闲着的任务事后去办。**
 
-### 5.2 回到 tasks.c：自杀只做一半，收尸另有其人
+### 5.2 回到 tasks.c：离职手续，自己只能办一半
 
-#### 5.2.1 vTaskDelete：把将死的人挂进"待终止链"，记一张便条
+#### 5.2.1 vTaskDelete：把要离职的人挂进"待离职链"，记一张便条
 
 看 `vTaskDelete` 删的若是"正在运行的任务自己"这条路（[tasks.c:2273](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L2273)）：
 
 ```c
 /* 删的是正在运行的任务：不能立刻释放它的栈和 TCB，
- * 先把它挂进"待终止链"，让空闲任务事后来收。 */
+ * 先把它挂进"待离职链"，让空闲任务事后来办结。 */
 vListInsertEnd( &xTasksWaitingTermination, &( pxTCB->xStateListItem ) );
 
-/* 记一笔：有一个任务待清理，空闲任务据此知道该去翻这张链。 */
+/* 记一笔：有一个任务待办结，空闲任务据此知道该去翻这张链。 */
 ++uxDeletedTasksWaitingCleanUp;
 ```
 
-它一句 `vPortFree` 都没有，只是把这个将死的任务**换了张链表挂着**——从就绪 / 运行，挪到"待终止链" `xTasksWaitingTermination`。**换状态 = 换链表**（§3 立下的那句话），删除也不例外。再给计数器 `uxDeletedTasksWaitingCleanUp` 加一，当作留给收尸人的便条。真正的释放，它一点没碰。
+它一句 `vPortFree` 都没有，只是把这个要离职的任务**换了张链表挂着**——从就绪 / 运行，挪到"待离职链" `xTasksWaitingTermination`（直译"等待终止的任务"）。**换状态 = 换链表**（§3 立下的那句话），删除也不例外。再给计数器 `uxDeletedTasksWaitingCleanUp` 加一，当作留给"办手续那人"的便条。真正的释放，它一点没碰。
 
-#### 5.2.2 空闲任务：那个永远兜底、顺手收尸的人
+#### 5.2.2 空闲任务：那个永远兜底、顺手把离职手续办了的人
 
-这里得正式认识一个角色：**空闲任务（Idle Task）**。它是 `vTaskStartScheduler`（§7 开工那一下）**自动**替你创建的、优先级最低（`tskIDLE_PRIORITY` = 0）的兜底任务——存在的头一个理由是"没有别的任务可跑时，CPU 也得有活干、有个栈可待着"。而它循环体里干的第一件事，恰恰就是收尸（[tasks.c:5833](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L5833)）：
+这里得正式认识一个角色：**空闲任务（Idle Task）**。它是 `vTaskStartScheduler`（§7 开工那一下）**自动**替你创建的、优先级最低（`tskIDLE_PRIORITY` = 0）的兜底任务——存在的头一个理由是"没有别的任务可跑时，CPU 也得有活干、有个栈可待着"。而它循环体里干的第一件事，恰恰就是替离职的人办结手续（[tasks.c:5833](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L5833)）：
 
 ```c
 static portTASK_FUNCTION( prvIdleTask, pvParameters )
@@ -655,7 +655,7 @@ static portTASK_FUNCTION( prvIdleTask, pvParameters )
 
 #### 5.2.3 prvCheckTasksWaitingTermination：真把栈和 TCB 还给堆
 
-收尸的活在这（[tasks.c:6110](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L6110)）：只要那张便条计数还大于 0，就从待终止链摘下一个，把栈和 TCB **真正**还给堆——
+办手续的活在这（[tasks.c:6110](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L6110)）：只要那张便条计数还大于 0，就从待离职链摘下一个，把栈和 TCB **真正**还给堆——
 
 ```c
 while( uxDeletedTasksWaitingCleanUp > ( UBaseType_t ) 0U )
@@ -673,13 +673,13 @@ while( uxDeletedTasksWaitingCleanUp > ( UBaseType_t ) 0U )
 }
 ```
 
-> 补一句对称的：如果你删的是**别的**任务（不是自己），那任务没站在自己栈上，`vTaskDelete` 就地 `prvDeleteTCB` 直接释放，用不着劳烦空闲任务。**只有"自杀"才需要收尸人**——因为没人能亲手拆掉自己脚下的地。
+> 补一句对称的：如果你让**别的**任务离职（不是自己），那人没站在自己栈上，`vTaskDelete` 就地 `prvDeleteTCB` 直接办结，用不着劳烦空闲任务。**只有"自己给自己办离职"才需要旁人接手**——因为没人能亲手拆掉自己脚下的地。
 
 ### 5.3 一个工程结论：删除后，内存不是"立刻"回来的
 
-把整条链串起来：`vTaskDelete` 判死刑、挂进终止链、记一笔 → 任务被换下台后不再运行 → 空闲任务某次轮到它跑，翻出终止链、把栈和 TCB 还给 heap_4（§17）。于是有一条**反直觉但必须记死**的工程结论：
+把整条链串起来：`vTaskDelete` 递交离职、挂进待离职链、记一笔 → 任务被换下台后不再运行 → 空闲任务某次轮到它跑，翻出这张链、把栈和 TCB 还给 heap_4（§17）。于是有一条**反直觉但必须记牢**的工程结论：
 
-> **删一个任务后，堆空间不是"立刻"回来的，而是"等空闲任务跑一趟"才回来。** 你若删完立刻 `xPortGetFreeHeapSize()`，很可能一点没涨——得等 CPU 空下来、让最低优先级的 Idle 收完尸，内存才真正归还。做内存紧张的系统时，这个时间差要心里有数。
+> **删一个任务后，堆空间不是"立刻"回来的，而是"等空闲任务跑一趟"才回来。** 你若删完立刻 `xPortGetFreeHeapSize()`，很可能一点没涨——得等 CPU 空下来、让最低优先级的 Idle 把手续办结，内存才真正归还。做内存紧张的系统时，这个时间差要心里有数。
 
 入职、退场都讲清了。可工作台只有一个——**工头到底派谁上台**？下一节，调度。
 
@@ -1439,11 +1439,13 @@ else                                /* AND：要的灯必须全亮 */
 
 硬把"等 A 且 B 且 C"塞进队列，你既没有"按位组合"的天然表达，也享不到"一次点灯唤醒一片"的便利。**所以内核没有勉强复用队列，而是给了它最贴身的一副骨架：一个整数当灯排，一张名单记谁在等、各等什么。** 结构跟着语义走，而不是反过来——这正是读内核源码最值得学的那点手艺。
 
-到这儿，PART2 的**任务协作四件套**就配齐了：传送带（队列）、名额（信号量）、钥匙（互斥锁）、信号墙（事件组）。但光有四块砖还不够——**真正盖房子，靠的是图纸。** 并发编程里有几套反复出现、也早被学界研究透了的"图纸"，下一节先挑两套最常用的，看它们怎么用我们刚拆过的砖搭起来。
+到这儿，PART2 的**任务协作四件套**就配齐了：传送带（队列）、名额（信号量）、钥匙（互斥锁）、信号墙（事件组）。他们有着一个fancy的名字，叫做同步原语（synchronization primitives). 但光有四块砖还不够——**真正盖房子，靠的是图纸。** 并发编程里有几套反复出现、也早被学界研究透了的"图纸"，下一节先挑两套最常用的，看它们怎么用我们刚拆过的砖搭起来。
 
 ## 13 两种并发设计模式：从"机制"到"架构"
 
-前面 §9–§12，我们把队列、信号量、互斥锁、事件组一件件拆到了源码——这些是**机制（mechanism）**，是砖。可写真实系统时，你脑子里想的往往不是"我该调 `xQueueSend` 还是 `xEventGroupSetBits`"，而是"这里是**谁产、谁消**""那里是**一处发生、多处关心**"。这种反复出现的结构，就是**设计模式（pattern）**，是图纸。这一节我们把话题从砖抬到图纸，挑两套并发编程里最经典的模式——它们都有几十年的学术渊源，也都能用手上这几块砖直接搭出来。
+
+
+我们把队列、信号量、互斥锁、事件组——这些是**机制（mechanism）**，是砖。这些机制有点像C语言的关键字一样，他们也是机制，但是只知道怎么用是不够的，因为他们背后对应着结构,, 也就是**设计模式（pattern）**，他描述并发系统如何建构，是写代码的人脑子里的图纸。这一节我们把话题从砖抬到图纸，挑两套并发编程里最经典的模式——它们都有几十年的学术渊源，也都能用手上这几块砖直接搭出来。
 
 > 这是本章少有的"往上抽一层"的一节：不再拆新源码，而是把已拆过的原语，**放回它们在软件架构里的位置**。读源码是"向下钻"，认模式是"向上看"——两样都会，才算真懂并发。
 
@@ -1861,7 +1863,7 @@ if( ( uint8_t * ) pxBlockToInsert + pxBlockToInsert->xBlockSize
 | **就绪 Ready** | 活儿备齐、就等叫号 | `pxReadyTasksLists[优先级]` | 创建完 / 等到了 / 被唤醒 |
 | **阻塞 Blocked** | 在等一个"条件"——等钟点或等资源 | `pxDelayedTaskList` + 某个事件等待链 | `vTaskDelay`、拿不到的 `xQueueReceive`… |
 | **挂起 Suspended** | 被无条件按停，工头当它不存在 | `xSuspendedTaskList` | 别人喊了 `vTaskSuspend` |
-| **删除 Deleted** | 已经判了死刑、等收尸 | `xTasksWaitingTermination` | 有人喊了 `vTaskDelete` |
+| **删除 Deleted** | 已经递了离职、等办结手续 | `xTasksWaitingTermination` | 有人喊了 `vTaskDelete` |
 
 > **一个任务的"状态"，本质就是"它此刻被挂在内核哪张链表上"。** §3 我们说链表是任务的"位置地图"，现在这句话有了最完整的含义——换一张表，就是换一种活法。`eTaskGetState()`（[tasks.c L2519](../../reference/rtos_src/FreeRTOS-Kernel/tasks.c#L2519)）判断任务状态的办法，干脆就是**挨个问"它的 `xStateListItem` 挂在哪张链表的 `pxContainer` 上"**——挂在挂起链就返回 `eSuspended`，挂在终止链就返回 `eDeleted`。状态不是 TCB 里存的一个枚举字段，而是"人在哪张表里"这个事实本身。
 
@@ -1880,11 +1882,11 @@ stateDiagram-v2
     就绪 --> 挂起: vTaskSuspend
     阻塞 --> 挂起: vTaskSuspend
     挂起 --> 就绪: vTaskResume
-    运行 --> 删除: vTaskDelete(NULL) 自杀
+    运行 --> 删除: vTaskDelete(NULL) 自己离职
     就绪 --> 删除: vTaskDelete(其它任务)
     阻塞 --> 删除: vTaskDelete
     挂起 --> 删除: vTaskDelete
-    删除 --> [*]: Idle 任务收尸，释放栈+TCB
+    删除 --> [*]: Idle 办结手续，释放栈+TCB
 ```
 
 图里有三件事值得停下来说清楚——正好是初学者最容易混的三处。
@@ -1900,7 +1902,7 @@ stateDiagram-v2
 
 ### 18.4 删除：一种"等着被回收"的终态
 
-删除的完整机制——为什么"自杀"只能做一半、空闲任务如何择机收尸、栈和 TCB 何时才真正还给 heap_4——我们已经在 **§5** 手撕过了，这里只把它**放回全景**：`vTaskDelete` 把任务挂进 `xTasksWaitingTermination`（又是"换状态 = 换链表"），从此它不再被调度；真正回收内存的，是空闲任务某次跑到的 `prvCheckTasksWaitingTermination`。
+删除的完整机制——为什么"自己办离职"只能办一半、空闲任务如何择机办结、栈和 TCB 何时才真正还给 heap_4——我们已经在 **§5** 手撕过了，这里只把它**放回全景**：`vTaskDelete` 把任务挂进 `xTasksWaitingTermination`（又是"换状态 = 换链表"），从此它不再被调度；真正回收内存的，是空闲任务某次跑到的 `prvCheckTasksWaitingTermination`。
 
 所以在这张全景图里，**删除同样是"挂在某张链表上"的一种状态**——只不过这张链表是**终点站**：下一步不是回就绪，而是被抹去。五种状态至此收齐：运行、就绪、阻塞、挂起，加这一个终态。
 
