@@ -1,0 +1,82 @@
+<svg viewBox="0 0 820 650" xmlns="http://www.w3.org/2000/svg" role="img" font-family="ui-sans-serif, system-ui, 'Segoe UI', sans-serif">
+  <title>一块 RAM 上的两根栈指针：MSP 钉死管公用栈，PSP 游走指当前任务</title>
+  <desc>整块 SRAM 竖着画，高地址在上、低地址在下。顶段是主栈/中断栈（MSP 指这里，全系统共用一块）；中间堆区 ucHeap 里切出任务A栈、任务B栈、空闲任务栈（每任务一块，PSP 指向当前在跑的那个任务栈）；底部是 .bss/.data。两根指针：MSP 固定指顶段不动；PSP 随换任务从一段改指另一段。段与段之间没有硬件墙，越界即踩邻居。谁当家只看模式：线程模式 SP=PSP，Handler 模式 SP=MSP。</desc>
+  <style>
+    svg{--ink:#1f2933;--mut:#64748b;--line:#94a3b8;--free:#eef2f7;--bss:#e2e8f0;
+        --psp:#2563eb;--pspb:#dbeafe;--msp:#d97706;--mspb:#fef3c7;--idle:#94a3b8;}
+    @media (prefers-color-scheme:dark){svg{--ink:#e5e7eb;--mut:#94a3b8;--line:#64748b;--free:#293548;--bss:#1f2a3a;
+        --psp:#60a5fa;--pspb:#1e3a5f;--msp:#fbbf24;--mspb:#3b2f10;--idle:#64748b;}}
+    .ink{fill:var(--ink)}.mut{fill:var(--mut)}.mono{font-family:ui-monospace,Menlo,monospace}
+  </style>
+
+  <text x="410" y="26" text-anchor="middle" class="ink" font-size="17" font-weight="700">一块 RAM 上的两根栈指针：MSP 钉死管公用栈，PSP 游走指当前任务</text>
+  <text x="410" y="47" text-anchor="middle" class="mut" font-size="11">MSP 和 PSP 不是两块内存，是<tspan font-weight="700">同一块 RAM 里两段地址</tspan>上的两根指针</text>
+
+  <text x="350" y="76" text-anchor="middle" class="mut mono" font-size="10.5">↑ 高地址（RAM 顶 _estack）</text>
+  <text x="350" y="600" text-anchor="middle" class="mut mono" font-size="10.5">↓ 低地址</text>
+
+  <!-- whole RAM -->
+  <rect x="250" y="82" width="200" height="500" rx="4" fill="none" stroke="var(--line)" stroke-width="1.5"/>
+
+  <!-- MSP main/interrupt stack region -->
+  <rect x="251" y="83" width="198" height="92" fill="var(--mspb)"/>
+  <text x="350" y="120" text-anchor="middle" class="ink" font-size="13" font-weight="700">主栈 / 中断栈</text>
+  <text x="350" y="139" text-anchor="middle" class="mono" font-size="12" fill="var(--msp)">MSP</text>
+  <text x="350" y="160" text-anchor="middle" class="mut" font-size="10">向下生长 ↓</text>
+  <line x1="251" y1="175" x2="449" y2="175" stroke="var(--line)" stroke-dasharray="4 3"/>
+
+  <!-- heap band with task stacks -->
+  <text x="350" y="196" text-anchor="middle" class="mut" font-size="10.5">堆区 ucHeap（任务栈从这儿挖）</text>
+  <rect x="268" y="206" width="164" height="58" rx="3" fill="var(--pspb)" stroke="var(--psp)" stroke-width="2"/>
+  <text x="350" y="230" text-anchor="middle" class="ink" font-size="12" font-weight="700">任务 A 栈</text>
+  <text x="350" y="248" text-anchor="middle" font-size="10" fill="var(--psp)">当前在跑</text>
+  <rect x="268" y="278" width="164" height="56" rx="3" fill="var(--free)" stroke="var(--idle)"/>
+  <text x="350" y="301" text-anchor="middle" class="ink" font-size="12" font-weight="700">任务 B 栈</text>
+  <text x="350" y="319" text-anchor="middle" class="mut" font-size="10">就绪 / 挂着</text>
+  <rect x="268" y="348" width="164" height="50" rx="3" fill="var(--free)" stroke="var(--idle)"/>
+  <text x="350" y="378" text-anchor="middle" class="ink" font-size="12" font-weight="700">空闲任务栈</text>
+  <line x1="251" y1="410" x2="449" y2="410" stroke="var(--line)" stroke-dasharray="4 3"/>
+
+  <!-- bss/data -->
+  <rect x="251" y="411" width="198" height="170" fill="var(--bss)"/>
+  <text x="350" y="495" text-anchor="middle" class="ink" font-size="12" font-weight="700">.bss / .data / 全局变量</text>
+  <text x="350" y="515" text-anchor="middle" class="mut" font-size="10">堆和任务栈也都在这同一片 RAM 里</text>
+
+  <!-- ===== LEFT: pointers ===== -->
+  <!-- MSP pointer: fixed -->
+  <line x1="168" y1="118" x2="248" y2="118" stroke="var(--msp)" stroke-width="2.4"/>
+  <path d="M250 118 L240 113 L240 123 Z" fill="var(--msp)"/>
+  <text x="162" y="114" text-anchor="end" class="mono" font-size="13" fill="var(--msp)" font-weight="700">MSP</text>
+  <text x="162" y="130" text-anchor="end" class="mut" font-size="10">钉死不动</text>
+
+  <!-- PSP pointer: to current task A -->
+  <line x1="168" y1="235" x2="266" y2="235" stroke="var(--psp)" stroke-width="2.4"/>
+  <path d="M268 235 L258 230 L258 240 Z" fill="var(--psp)"/>
+  <text x="162" y="231" text-anchor="end" class="mono" font-size="13" fill="var(--psp)" font-weight="700">PSP</text>
+  <text x="162" y="247" text-anchor="end" class="mut" font-size="10">指当前任务 A</text>
+
+  <!-- roaming arc A -> B -->
+  <path d="M268 252 C 214 264, 214 292, 264 304" fill="none" stroke="var(--psp)" stroke-width="1.6" stroke-dasharray="5 3"/>
+  <path d="M266 304 L256 299 L257 309 Z" fill="var(--psp)"/>
+  <text x="150" y="286" text-anchor="middle" class="mut" font-size="10">换任务时</text>
+  <text x="150" y="300" text-anchor="middle" font-size="10" fill="var(--psp)" font-weight="700">PSP 改指下一段</text>
+
+  <!-- ===== RIGHT: annotations ===== -->
+  <line x1="450" y1="120" x2="470" y2="120" stroke="var(--msp)" stroke-width="1.4"/>
+  <text x="474" y="110" class="mut" font-size="10.5">复位后 <tspan class="mono">main</tspan>、内核、</text>
+  <text x="474" y="125" class="mut" font-size="10.5">所有中断 / PendSV 共用，</text>
+  <text x="474" y="140" class="ink" font-size="10.5" font-weight="700">全系统就这一块。</text>
+
+  <line x1="432" y1="235" x2="470" y2="235" stroke="var(--psp)" stroke-width="1.4"/>
+  <text x="474" y="221" class="mut" font-size="10.5">中断时，硬件把<tspan fill="var(--psp)" font-weight="700">异常帧</tspan></text>
+  <text x="474" y="236" class="mut" font-size="10.5">压进「被打断那段」= 任务的 PSP 栈；</text>
+  <text x="474" y="251" class="mut" font-size="10.5">handler 函数体才跑在 <tspan fill="var(--msp)" font-weight="700">MSP 段</tspan>。</text>
+
+  <line x1="432" y1="320" x2="470" y2="320" stroke="var(--idle)" stroke-width="1.4"/>
+  <text x="474" y="316" class="mut" font-size="10.5">每个任务一块栈，</text>
+  <text x="474" y="331" class="mut" font-size="10.5">从 <tspan class="mono">ucHeap</tspan> 或静态数组挖出来。</text>
+
+  <!-- ===== bottom: mode legend + honesty ===== -->
+  <rect x="60" y="612" width="700" height="30" rx="5" fill="var(--free)" stroke="var(--line)"/>
+  <text x="76" y="631" class="ink" font-size="11">谁当家只看模式：<tspan class="mono" fill="var(--psp)" font-weight="700">线程模式→SP=PSP</tspan>　｜　<tspan class="mono" fill="var(--msp)" font-weight="700">Handler模式→SP=MSP</tspan>　；　同一块 RAM 段间<tspan font-weight="700">无硬件墙</tspan>，越界即踩邻居（§13.4），要真墙得配 MPU。</text>
+</svg>

@@ -1,0 +1,51 @@
+<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" role="img" font-family="ui-sans-serif, system-ui, 'Segoe UI', sans-serif">
+  <title>生产者-消费者：一条有界缓冲，解耦快慢两端</title>
+  <desc>左边两个生产者把数据放进中间的有界缓冲（就是 FreeRTOS 队列），右边两个消费者取走。缓冲满则生产者阻塞（空位信号量为 0），缓冲空则消费者阻塞（货信号量为 0）。</desc>
+  <style>
+    svg{--ink:#1f2933;--mut:#64748b;--line:#94a3b8;--free:#eef2f7;
+        --prod:#2563eb;--prodb:#dbeafe;--cons:#0d9488;--consb:#ccfbf1;--fill:#f59e0b;--fillb:#fef3c7;}
+    @media (prefers-color-scheme:dark){svg{--ink:#e5e7eb;--mut:#94a3b8;--line:#64748b;--free:#293548;
+        --prod:#60a5fa;--prodb:#1e3a5f;--cons:#2dd4bf;--consb:#134e4a;--fill:#fbbf24;--fillb:#3b2f10;}}
+    .ink{fill:var(--ink)}.mut{fill:var(--mut)}.mono{font-family:ui-monospace,Menlo,monospace}
+  </style>
+  <defs>
+    <marker id="pc" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 Z" fill="var(--mut)"/></marker>
+  </defs>
+  <text x="380" y="26" text-anchor="middle" class="ink" font-size="16" font-weight="700">生产者-消费者：一条有界缓冲，解耦快慢两端</text>
+
+  <!-- producers -->
+  <rect x="40" y="80" width="110" height="40" rx="6" fill="var(--prodb)" stroke="var(--prod)"/>
+  <text x="95" y="105" text-anchor="middle" class="ink" font-size="12">生产者 P1</text>
+  <rect x="40" y="150" width="110" height="40" rx="6" fill="var(--prodb)" stroke="var(--prod)"/>
+  <text x="95" y="175" text-anchor="middle" class="ink" font-size="12">生产者 P2</text>
+  <path d="M150 100 L250 128" stroke="var(--mut)" stroke-width="1.4" fill="none" marker-end="url(#pc)"/>
+  <path d="M150 170 L250 152" stroke="var(--mut)" stroke-width="1.4" fill="none" marker-end="url(#pc)"/>
+  <text x="196" y="112" class="mut" font-size="9.5">放入</text>
+
+  <!-- bounded buffer -->
+  <text x="380" y="112" text-anchor="middle" class="mono" font-size="11" fill="var(--ink)" font-weight="700">有界缓冲 = 队列（§8）</text>
+  <g>
+    <rect x="252" y="120" width="256" height="40" rx="4" fill="var(--free)" stroke="var(--line)"/>
+    <rect x="256" y="124" width="40" height="32" fill="var(--fillb)" stroke="var(--fill)"/><text x="276" y="145" text-anchor="middle" class="mono" font-size="11" fill="var(--fill)">货</text>
+    <rect x="298" y="124" width="40" height="32" fill="var(--fillb)" stroke="var(--fill)"/><text x="318" y="145" text-anchor="middle" class="mono" font-size="11" fill="var(--fill)">货</text>
+    <rect x="340" y="124" width="40" height="32" fill="var(--fillb)" stroke="var(--fill)"/><text x="360" y="145" text-anchor="middle" class="mono" font-size="11" fill="var(--fill)">货</text>
+    <rect x="382" y="124" width="40" height="32" fill="none" stroke="var(--line)" stroke-dasharray="3 2"/>
+    <rect x="424" y="124" width="40" height="32" fill="none" stroke="var(--line)" stroke-dasharray="3 2"/>
+    <rect x="466" y="124" width="38" height="32" fill="none" stroke="var(--line)" stroke-dasharray="3 2"/>
+  </g>
+
+  <!-- consumers -->
+  <rect x="610" y="80" width="110" height="40" rx="6" fill="var(--consb)" stroke="var(--cons)"/>
+  <text x="665" y="105" text-anchor="middle" class="ink" font-size="12">消费者 C1</text>
+  <rect x="610" y="150" width="110" height="40" rx="6" fill="var(--consb)" stroke="var(--cons)"/>
+  <text x="665" y="175" text-anchor="middle" class="ink" font-size="12">消费者 C2</text>
+  <path d="M508 132 L610 100" stroke="var(--mut)" stroke-width="1.4" fill="none" marker-end="url(#pc)"/>
+  <path d="M508 148 L610 170" stroke="var(--mut)" stroke-width="1.4" fill="none" marker-end="url(#pc)"/>
+  <text x="560" y="112" class="mut" font-size="9.5">取走</text>
+
+  <!-- notes -->
+  <rect x="40" y="224" width="680" height="72" rx="6" fill="var(--free)" stroke="var(--line)"/>
+  <text x="380" y="246" text-anchor="middle" class="ink" font-size="11.5" font-weight="700">队列把"两个计数信号量 + 一把互斥锁"全内置了（Dijkstra 的经典解法）：</text>
+  <text x="56" y="270" class="mut" font-size="11">· <tspan fill="var(--prod)" font-weight="700">缓冲满</tspan> → 生产者 <tspan class="mono">xQueueSend</tspan> 阻塞（"空位"信号量 empty=0，没坑可放）；</text>
+  <text x="56" y="288" class="mut" font-size="11">· <tspan fill="var(--cons)" font-weight="700">缓冲空</tspan> → 消费者 <tspan class="mono">xQueueReceive</tspan> 阻塞（"货"信号量 full=0，没货可取）。两端各按各的速度跑，缓冲吸收突发。</text>
+</svg>

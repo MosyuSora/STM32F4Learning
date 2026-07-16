@@ -1,0 +1,5 @@
+model: scheduler already selected LOG
+PendSV: save PSP=0x20001000 into LED TCB
+PendSV: pxCurrentTCB LED -> LOG
+PendSV: restore PSP=0x20002000 from LOG TCB
+

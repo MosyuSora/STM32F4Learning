@@ -1,0 +1,6 @@
+created LED    priority=2 top=<addr> -> ready list
+created LOG    priority=1 top=<addr> -> ready list
+ready list after creation:
+  LOG is ready but not necessarily running
+  LED is ready but not necessarily running
+

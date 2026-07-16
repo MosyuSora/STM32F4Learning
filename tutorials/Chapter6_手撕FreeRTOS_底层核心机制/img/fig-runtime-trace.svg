@@ -1,0 +1,77 @@
+<svg viewBox="0 0 812 250" xmlns="http://www.w3.org/2000/svg" role="img" font-family="ui-sans-serif, system-ui, 'Segoe UI', sans-serif">
+  <title>一帧数据的旅程：七步串起全章机制</title>
+  <desc>从左到右的时间线，七张卡片依次是：①tick 到点、SENSOR 延时到期而就绪；②SENSOR 上台采样、投进队列；③COMM 被队列唤醒取数据；④COMM 取互斥锁写共享缓冲；⑤串口中断插入、SendFromISR 后退出即换班；⑥COMM 放锁并点亮"帧就绪"事件、广播唤醒 LOG；⑦大家都睡下，Idle 上台顺手办离职手续。每张卡片标注对应的章节。</desc>
+  <style>
+    svg{--ink:#1f2933;--mut:#64748b;--line:#94a3b8;--card:#eef2f7;
+        --a:#2563eb;--b:#0d9488;--c:#7c3aed;--d:#dc2626;--e:#d97706;}
+    @media (prefers-color-scheme:dark){svg{--ink:#e5e7eb;--mut:#94a3b8;--line:#64748b;--card:#293548;
+        --a:#60a5fa;--b:#2dd4bf;--c:#a78bfa;--d:#f87171;--e:#fbbf24;}}
+    .ink{fill:var(--ink)}.mut{fill:var(--mut)}.mono{font-family:ui-monospace,Menlo,monospace}
+    .t{font-size:8.7}.tag{font-size:8.5;font-weight:700}
+  </style>
+  <text x="406" y="22" text-anchor="middle" class="ink" font-size="15" font-weight="700">一帧数据的旅程：七步串起全章机制</text>
+
+  <!-- time axis -->
+  <line x1="12" y1="196" x2="788" y2="196" stroke="var(--line)" stroke-width="1.5"/>
+  <path d="M788 196 L780 192 L780 200 Z" fill="var(--line)"/>
+  <text x="748" y="214" class="mut" font-size="10">时间 →</text>
+
+  <g>
+    <!-- card template: rect + badge + lines + tag ; 7 cards -->
+    <!-- 1 -->
+    <rect x="12" y="40" width="100" height="140" rx="6" fill="var(--card)" stroke="var(--a)"/>
+    <circle cx="28" cy="56" r="9" fill="var(--a)"/><text x="28" y="60" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">1</text>
+    <text x="62" y="82" text-anchor="middle" class="ink t" font-weight="700">tick 到点</text>
+    <text x="62" y="98" text-anchor="middle" class="mut t">SENSOR 延时</text>
+    <text x="62" y="110" text-anchor="middle" class="mut t">到期→就绪</text>
+    <text x="62" y="168" text-anchor="middle" class="tag" fill="var(--a)">§8 Delay/Tick</text>
+    <line x1="112" y1="110" x2="120" y2="110" stroke="var(--line)"/>
+    <!-- 2 -->
+    <rect x="124" y="40" width="100" height="140" rx="6" fill="var(--card)" stroke="var(--b)"/>
+    <circle cx="140" cy="56" r="9" fill="var(--b)"/><text x="140" y="60" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">2</text>
+    <text x="174" y="82" text-anchor="middle" class="ink t" font-weight="700">SENSOR 上台</text>
+    <text x="174" y="98" text-anchor="middle" class="mut t">采样，投进</text>
+    <text x="174" y="110" text-anchor="middle" class="mut t">队列 dataQ</text>
+    <text x="174" y="168" text-anchor="middle" class="tag" fill="var(--b)">§6 · §9</text>
+    <line x1="224" y1="110" x2="232" y2="110" stroke="var(--line)"/>
+    <!-- 3 -->
+    <rect x="236" y="40" width="100" height="140" rx="6" fill="var(--card)" stroke="var(--b)"/>
+    <circle cx="252" cy="56" r="9" fill="var(--b)"/><text x="252" y="60" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">3</text>
+    <text x="286" y="82" text-anchor="middle" class="ink t" font-weight="700">COMM 被</text>
+    <text x="286" y="98" text-anchor="middle" class="mut t">队列唤醒，</text>
+    <text x="286" y="110" text-anchor="middle" class="mut t">取走数据</text>
+    <text x="286" y="168" text-anchor="middle" class="tag" fill="var(--b)">§9 队列</text>
+    <line x1="336" y1="110" x2="344" y2="110" stroke="var(--line)"/>
+    <!-- 4 -->
+    <rect x="348" y="40" width="100" height="140" rx="6" fill="var(--card)" stroke="var(--c)"/>
+    <circle cx="364" cy="56" r="9" fill="var(--c)"/><text x="364" y="60" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">4</text>
+    <text x="398" y="82" text-anchor="middle" class="ink t" font-weight="700">取互斥锁</text>
+    <text x="398" y="98" text-anchor="middle" class="mut t">写共享缓冲</text>
+    <text x="398" y="110" text-anchor="middle" class="mut t">（独占）</text>
+    <text x="398" y="168" text-anchor="middle" class="tag" fill="var(--c)">§11 互斥锁</text>
+    <line x1="448" y1="110" x2="456" y2="110" stroke="var(--line)"/>
+    <!-- 5 -->
+    <rect x="460" y="40" width="100" height="140" rx="6" fill="var(--card)" stroke="var(--d)"/>
+    <circle cx="476" cy="56" r="9" fill="var(--d)"/><text x="476" y="60" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">5</text>
+    <text x="510" y="82" text-anchor="middle" class="ink t" font-weight="700">串口 ISR 插入</text>
+    <text x="510" y="98" text-anchor="middle" class="mut t">SendFromISR，</text>
+    <text x="510" y="110" text-anchor="middle" class="mut t">退出即换班</text>
+    <text x="510" y="168" text-anchor="middle" class="tag" fill="var(--d)">§15 中断</text>
+    <line x1="560" y1="110" x2="568" y2="110" stroke="var(--line)"/>
+    <!-- 6 -->
+    <rect x="572" y="40" width="100" height="140" rx="6" fill="var(--card)" stroke="var(--c)"/>
+    <circle cx="588" cy="56" r="9" fill="var(--c)"/><text x="588" y="60" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">6</text>
+    <text x="622" y="82" text-anchor="middle" class="ink t" font-weight="700">放锁 + 点亮</text>
+    <text x="622" y="98" text-anchor="middle" class="mut t">"帧就绪"灯，</text>
+    <text x="622" y="110" text-anchor="middle" class="mut t">广播唤醒 LOG</text>
+    <text x="622" y="168" text-anchor="middle" class="tag" fill="var(--c)">§11 · §12</text>
+    <line x1="672" y1="110" x2="680" y2="110" stroke="var(--line)"/>
+    <!-- 7 -->
+    <rect x="684" y="40" width="100" height="140" rx="6" fill="var(--card)" stroke="var(--e)"/>
+    <circle cx="700" cy="56" r="9" fill="var(--e)"/><text x="700" y="60" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">7</text>
+    <text x="734" y="82" text-anchor="middle" class="ink t" font-weight="700">都睡下了</text>
+    <text x="734" y="98" text-anchor="middle" class="mut t">Idle 上台，</text>
+    <text x="734" y="110" text-anchor="middle" class="mut t">顺手办离职</text>
+    <text x="734" y="168" text-anchor="middle" class="tag" fill="var(--e)">§5 · §7</text>
+  </g>
+</svg>

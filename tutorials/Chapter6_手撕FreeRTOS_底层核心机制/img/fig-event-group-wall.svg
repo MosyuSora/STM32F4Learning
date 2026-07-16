@@ -1,0 +1,60 @@
+<svg viewBox="0 0 760 450" xmlns="http://www.w3.org/2000/svg" role="img" font-family="ui-sans-serif, system-ui, 'Segoe UI', sans-serif">
+  <title>事件组：一堵信号墙 —— 一个整数当灯排，一张名单记谁在等</title>
+  <desc>上方是 uxEventBits，一排 8 盏信号灯（每位一盏），bit0/bit1/bit2 已点亮；任务和中断各自把自己那盏灯点亮。下方是等待名单 xTasksWaitingForBits：等待者 P 要 bit0&bit1&bit2 全亮（AND），现已满足被叫醒；等待者 Q 要 bit5 或 bit6 任一（OR），都没亮，继续等。每个等待者把「要哪几盏 + AND/OR + 看完是否灭」打包记在自己牌子上。</desc>
+  <style>
+    svg{--ink:#1f2933;--mut:#64748b;--line:#94a3b8;--free:#eef2f7;
+        --on:#f59e0b;--onb:#fef3c7;--off:#cbd5e1;--offb:#e2e8f0;
+        --ok:#16a34a;--okb:#dcfce7;--wait:#2563eb;--waitb:#dbeafe;}
+    @media (prefers-color-scheme:dark){svg{--ink:#e5e7eb;--mut:#94a3b8;--line:#64748b;--free:#293548;
+        --on:#fbbf24;--onb:#3b2f10;--off:#475569;--offb:#334155;
+        --ok:#4ade80;--okb:#14351f;--wait:#60a5fa;--waitb:#1e3a5f;}}
+    .ink{fill:var(--ink)}.mut{fill:var(--mut)}.mono{font-family:ui-monospace,Menlo,monospace}
+  </style>
+  <text x="380" y="26" text-anchor="middle" class="ink" font-size="16" font-weight="700">事件组：一堵信号墙 —— 一个整数当灯排，一张名单记谁在等</text>
+
+  <!-- setters -->
+  <text x="150" y="66" class="mut" font-size="10.5">任务WIFI<tspan class="mono"> set bit0</tspan></text>
+  <text x="150" y="80" class="mut" font-size="10.5">任务CFG <tspan class="mono"> set bit1</tspan></text>
+  <text x="150" y="94" class="mut" font-size="10.5">串口ISR <tspan class="mono"> set bit2</tspan></text>
+  <path d="M232 78 L300 105" stroke="var(--on)" stroke-width="1.3" fill="none" marker-end="url(#a)"/>
+  <defs><marker id="a" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="var(--on)"/></marker></defs>
+
+  <!-- bit wall -->
+  <text x="490" y="92" text-anchor="middle" class="mono" font-size="11" fill="var(--ink)" font-weight="700">uxEventBits（一排信号灯）</text>
+  <g font-family="ui-monospace,Menlo,monospace">
+    <!-- bit7..bit3 off -->
+    <rect x="300" y="100" width="50" height="50" rx="4" fill="var(--offb)" stroke="var(--off)"/><text x="325" y="130" text-anchor="middle" font-size="15" fill="var(--mut)">0</text><text x="325" y="166" text-anchor="middle" font-size="9" class="mut">bit7</text>
+    <rect x="352" y="100" width="50" height="50" rx="4" fill="var(--offb)" stroke="var(--off)"/><text x="377" y="130" text-anchor="middle" font-size="15" fill="var(--mut)">0</text><text x="377" y="166" text-anchor="middle" font-size="9" class="mut">bit6</text>
+    <rect x="404" y="100" width="50" height="50" rx="4" fill="var(--offb)" stroke="var(--off)"/><text x="429" y="130" text-anchor="middle" font-size="15" fill="var(--mut)">0</text><text x="429" y="166" text-anchor="middle" font-size="9" class="mut">bit5</text>
+    <rect x="456" y="100" width="50" height="50" rx="4" fill="var(--offb)" stroke="var(--off)"/><text x="481" y="130" text-anchor="middle" font-size="15" fill="var(--mut)">0</text><text x="481" y="166" text-anchor="middle" font-size="9" class="mut">bit4</text>
+    <rect x="508" y="100" width="50" height="50" rx="4" fill="var(--offb)" stroke="var(--off)"/><text x="533" y="130" text-anchor="middle" font-size="15" fill="var(--mut)">0</text><text x="533" y="166" text-anchor="middle" font-size="9" class="mut">bit3</text>
+    <!-- bit2..bit0 on -->
+    <rect x="560" y="100" width="50" height="50" rx="4" fill="var(--onb)" stroke="var(--on)" stroke-width="2"/><text x="585" y="130" text-anchor="middle" font-size="15" font-weight="700" fill="var(--on)">1</text><text x="585" y="166" text-anchor="middle" font-size="9" class="mut">bit2</text>
+    <rect x="612" y="100" width="50" height="50" rx="4" fill="var(--onb)" stroke="var(--on)" stroke-width="2"/><text x="637" y="130" text-anchor="middle" font-size="15" font-weight="700" fill="var(--on)">1</text><text x="637" y="166" text-anchor="middle" font-size="9" class="mut">bit1</text>
+    <rect x="664" y="100" width="50" height="50" rx="4" fill="var(--onb)" stroke="var(--on)" stroke-width="2"/><text x="689" y="130" text-anchor="middle" font-size="15" font-weight="700" fill="var(--on)">1</text><text x="689" y="166" text-anchor="middle" font-size="9" class="mut">bit0</text>
+  </g>
+
+  <!-- waiting list -->
+  <text x="380" y="212" text-anchor="middle" class="mono" font-size="11" fill="var(--ink)" font-weight="700">xTasksWaitingForBits（等待名单：谁在等、各等什么）</text>
+
+  <!-- waiter P : AND satisfied -->
+  <rect x="70" y="228" width="300" height="86" rx="6" fill="var(--okb)" stroke="var(--ok)" stroke-width="1.6"/>
+  <text x="86" y="252" class="ink" font-size="12.5" font-weight="700">等待者 P</text>
+  <text x="86" y="272" class="mut" font-size="11">要 <tspan class="mono" fill="var(--ink)">bit0 &amp; bit1 &amp; bit2</tspan> 全亮（<tspan font-weight="700">AND</tspan>）</text>
+  <text x="86" y="292" class="mut" font-size="11">三盏现在都亮了 → 条件满足</text>
+  <text x="86" y="307" font-size="11.5" fill="var(--ok)" font-weight="700">✓ 被叫醒，拎回就绪</text>
+
+  <!-- waiter Q : OR not met -->
+  <rect x="390" y="228" width="300" height="86" rx="6" fill="var(--waitb)" stroke="var(--wait)" stroke-width="1.6"/>
+  <text x="406" y="252" class="ink" font-size="12.5" font-weight="700">等待者 Q</text>
+  <text x="406" y="272" class="mut" font-size="11">要 <tspan class="mono" fill="var(--ink)">bit5 或 bit6</tspan> 任一（<tspan font-weight="700">OR</tspan>）</text>
+  <text x="406" y="292" class="mut" font-size="11">两盏都还灭着 → 条件不满足</text>
+  <text x="406" y="307" font-size="11.5" fill="var(--wait)" font-weight="700">⏳ 继续睡在名单里</text>
+
+  <!-- bottom note -->
+  <rect x="70" y="336" width="620" height="92" rx="6" fill="var(--free)" stroke="var(--line)"/>
+  <text x="84" y="358" class="ink" font-size="11.5" font-weight="700">两样东西，就够了：</text>
+  <text x="84" y="378" class="mut" font-size="11">· 一个整数 <tspan class="mono">uxEventBits</tspan> 当灯排——<tspan font-weight="700">没有数据缓冲区</tspan>，一盏灯只表示某件事「成了/没成」。</text>
+  <text x="84" y="397" class="mut" font-size="11">· 一张名单 <tspan class="mono">xTasksWaitingForBits</tspan>——每个等待者把「要哪几盏 + AND/OR + 看完是否灭」打包，</text>
+  <text x="98" y="414" class="mut" font-size="11">记在<tspan fill="var(--wait)" font-weight="700">自己牌子 xEventListItem 的号</tspan>上；点灯的人挨个比对，谁够条件就叫醒谁（<tspan font-weight="700">能一次叫醒好几个</tspan>）。</text>
+</svg>

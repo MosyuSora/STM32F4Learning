@@ -1,0 +1,6 @@
+LOW_LOG takes mutex
+MID_WORK is ready and could preempt LOW_LOG if no inheritance exists
+HIGH_COMM waits for mutex owned by LOW_LOG
+inherit: LOW_LOG priority 1 -> 3
+LOW_LOG releases mutex, priority restores 3 -> 1
+

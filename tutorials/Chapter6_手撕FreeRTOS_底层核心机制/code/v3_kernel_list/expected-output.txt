@@ -1,0 +1,15 @@
+ready: empty
+delayed: empty
+event_wait: empty
+move LED    -> ready
+move SENSOR -> ready
+move LOG    -> ready
+ready: LOG SENSOR LED
+remove SENSOR <- ready
+move SENSOR -> delayed
+remove LOG    <- ready
+move LOG    -> event_wait
+ready: LED
+delayed: SENSOR
+event_wait: LOG
+

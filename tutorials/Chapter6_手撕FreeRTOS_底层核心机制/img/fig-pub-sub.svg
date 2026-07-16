@@ -1,0 +1,45 @@
+<svg viewBox="0 0 760 340" xmlns="http://www.w3.org/2000/svg" role="img" font-family="ui-sans-serif, system-ui, 'Segoe UI', sans-serif">
+  <title>发布-订阅：一次广播，多个订阅者各自被唤醒</title>
+  <desc>左边发布者把一个事件发到中间的主题（可用事件组实现），右边三个订阅者各自登记；发布者不认识订阅者是谁。三重解耦：空间、时间、同步。</desc>
+  <style>
+    svg{--ink:#1f2933;--mut:#64748b;--line:#94a3b8;--free:#eef2f7;
+        --pub:#dc2626;--pubb:#fee2e2;--topic:#7c3aed;--topicb:#ede9fe;--sub:#0d9488;--subb:#ccfbf1;}
+    @media (prefers-color-scheme:dark){svg{--ink:#e5e7eb;--mut:#94a3b8;--line:#64748b;--free:#293548;
+        --pub:#f87171;--pubb:#4c1d1d;--topic:#a78bfa;--topicb:#3b2f63;--sub:#2dd4bf;--subb:#134e4a;}}
+    .ink{fill:var(--ink)}.mut{fill:var(--mut)}.mono{font-family:ui-monospace,Menlo,monospace}
+  </style>
+  <defs>
+    <marker id="ps" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 Z" fill="var(--topic)"/></marker>
+  </defs>
+  <text x="380" y="26" text-anchor="middle" class="ink" font-size="16" font-weight="700">发布-订阅：一次广播，多个订阅者各自被唤醒</text>
+
+  <!-- publisher -->
+  <rect x="34" y="130" width="120" height="52" rx="6" fill="var(--pubb)" stroke="var(--pub)"/>
+  <text x="94" y="152" text-anchor="middle" class="ink" font-size="12" font-weight="700">发布者</text>
+  <text x="94" y="170" text-anchor="middle" class="mut" font-size="10">如"传感器就绪"</text>
+  <path d="M154 156 L290 156" stroke="var(--topic)" stroke-width="1.6" fill="none" marker-end="url(#ps)"/>
+  <text x="222" y="148" text-anchor="middle" class="mut" font-size="9.5">发布 / set bit</text>
+
+  <!-- topic -->
+  <rect x="292" y="120" width="128" height="72" rx="8" fill="var(--topicb)" stroke="var(--topic)" stroke-width="1.8"/>
+  <text x="356" y="150" text-anchor="middle" class="ink" font-size="12.5" font-weight="700">主题 / 中介</text>
+  <text x="356" y="170" text-anchor="middle" class="mono" font-size="10" fill="var(--topic)">事件组（§11）</text>
+
+  <!-- subscribers -->
+  <rect x="600" y="70" width="120" height="40" rx="6" fill="var(--subb)" stroke="var(--sub)"/>
+  <text x="660" y="95" text-anchor="middle" class="ink" font-size="12">订阅者·日志</text>
+  <rect x="600" y="136" width="120" height="40" rx="6" fill="var(--subb)" stroke="var(--sub)"/>
+  <text x="660" y="161" text-anchor="middle" class="ink" font-size="12">订阅者·UI</text>
+  <rect x="600" y="202" width="120" height="40" rx="6" fill="var(--subb)" stroke="var(--sub)"/>
+  <text x="660" y="227" text-anchor="middle" class="ink" font-size="12">订阅者·上报</text>
+  <path d="M420 150 L600 90"  stroke="var(--topic)" stroke-width="1.4" fill="none" marker-end="url(#ps)"/>
+  <path d="M420 156 L600 156" stroke="var(--topic)" stroke-width="1.4" fill="none" marker-end="url(#ps)"/>
+  <path d="M420 162 L600 222" stroke="var(--topic)" stroke-width="1.4" fill="none" marker-end="url(#ps)"/>
+  <text x="510" y="128" text-anchor="middle" class="mut" font-size="9.5">一次广播，各自被唤醒</text>
+
+  <!-- notes -->
+  <rect x="34" y="262" width="686" height="66" rx="6" fill="var(--free)" stroke="var(--line)"/>
+  <text x="50" y="284" class="ink" font-size="11.5" font-weight="700">发布者不认识订阅者是谁 —— 三重解耦（Eugster 等, 2003）：</text>
+  <text x="50" y="304" class="mut" font-size="11">· <tspan font-weight="700">空间</tspan>：发布者不持有订阅者的引用　· <tspan font-weight="700">时间</tspan>：双方不必同时在线　· <tspan font-weight="700">同步</tspan>：发布不阻塞、立刻返回</text>
+  <text x="50" y="321" class="mut" font-size="11">加一个订阅者，<tspan font-weight="700">不用改发布者一行代码</tspan>——这正是发布-订阅相对"直接调用"的价值。</text>
+</svg>

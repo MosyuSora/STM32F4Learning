@@ -1,0 +1,17 @@
+initial free list
+  block0 start=0 size=100 free
+after malloc task stack 40
+  block0 start=0 size=40 used
+  block1 start=40 size=60 free
+after malloc queue storage 30
+  block0 start=0 size=40 used
+  block1 start=40 size=30 used
+  block2 start=70 size=30 free
+after free task stack 40
+  block0 start=0 size=40 free
+  block1 start=40 size=30 used
+  block2 start=70 size=30 free
+malloc 48 fails: total_free=70 largest_free=40
+after free queue and coalesce adjacent blocks
+  block0 start=0 size=100 free
+malloc 120 fails: largest free block is 100
