@@ -26,3 +26,22 @@ reference/linux_proj/workspace/lcd_test/m0nesy.zip
 
 # 超过 GitHub 100MB 单文件上限的大型资料
 reference/linux_proj/workspace/driver_examples/IMX6ULL/source/10_PCI_PCIe/rk3399_linux_release_*.tar.bz2
+
+# Local task/plugin state
+/.claude-plugin/
+/config.json
+/events.jsonl
+/labels/
+/sessions/
+/sources/
+/statuses/
+/views.json
+
+# Generated previews and temporary files
+/output/pdf/preview/
+*.bak
+*.tmp
+*.log
+*.pyc
+__pycache__/
+.uv-cache/
